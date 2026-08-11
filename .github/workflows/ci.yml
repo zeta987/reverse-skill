@@ -71,17 +71,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          bash skills/scripts/test-routing.sh
+
           scratch="$(mktemp -d)"
           trap 'rm -rf "$scratch"' EXIT
-          while IFS='|' read -r hint expected; do
-            out="$scratch/$expected"
-            bash skills/scripts/master-route.sh --hint "$hint" --out-dir "$out"
-            grep -Eq "^- primary: ${expected}$" "$out/route-scope.md"
-          done <<'CASES'
-          apk reverse with jadx|R1
-          js reverse signature|R3
-          case review evidence graph|R40
-          CASES
 
           if bash skills/scripts/case-init.sh \
               --hint "offline apk" \
