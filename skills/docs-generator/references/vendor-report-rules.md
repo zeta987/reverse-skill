@@ -167,7 +167,7 @@
 | 1. 逆向工程报告 | 默认 `flavor = null`，保留原「静态/动态/复现」骨架和导入表等硬门 Evidence；只有明确恶意样本才套 §2 |
 | 2. 渗透测试报告 | `flavor = null`；补 Base 中适用的 G1–G3，攻击路径对齐 §0 Path，不强制 IOC |
 | 3. CTF Writeup | `flavor = null`；保留原题目、解题思路和复现结构，不强制 IOC/ATT&CK |
-| 4. JS/Web 签名逆向 | 默认偏 `malware` 精简：概述 → 定位 → 算法 → 复现 → IOC(n/a 常见) |
+| 4. JS/Web 签名逆向 | `flavor = null`；使用原概述 → 定位 → 算法 → 复现骨架，不套 malware |
 | 恶意软件 / APT 专项 | 显式选 `malware` 或 `apt` 全文骨架 |
 
 **冲突解决**：§0 Evidence 链字段与 scope 门禁 **永远优先**；flavor 只改叙事顺序与专业外壳，不得删除 E/F/P。

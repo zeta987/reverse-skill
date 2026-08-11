@@ -189,6 +189,11 @@ if ($vendorRulesText -match '先确认 scope 并保全' -and $vendorRulesText -m
 } else {
     Bad 'malware remediation does not require evidence preservation before destructive actions'
 }
+if ($vendorRulesText -match '(?m)JS/Web 签名逆向报告\s*\|[^\r\n]*malware') {
+    Bad 'vendor rules route JS signature reports through malware flavor'
+} else {
+    Ok 'vendor rules keep JS signature reports flavor-neutral'
+}
 $fieldLog | Set-Content -LiteralPath (Join-Path $ScratchDir 'template-fields.txt') -Encoding UTF8
 
 # --- role map skills exist for primary rows ---
