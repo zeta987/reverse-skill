@@ -182,6 +182,13 @@ Assert-Fields (Join-Path $skillsRoot 'pentest-tools/references\recon-pipeline.md
 Assert-Fields (Join-Path $skillsRoot 'docs-generator/references\security-report-templates.md') @('Evidence Chain', 'Findings', 'Path')
 Assert-Fields (Join-Path $skillsRoot 'field-journal/_template.md') @('Scope', 'Evidence', 'Finding')
 Assert-Fields (Join-Path $skillsRoot 'case-review/SKILL.md') @('ACTION REQUIRED', 'review_case.py', 'Evidence Graph Review')
+$vendorRulesPath = Join-Path $skillsRoot 'docs-generator/references\vendor-report-rules.md'
+$vendorRulesText = Get-Content $vendorRulesPath -Raw -Encoding UTF8
+if ($vendorRulesText -match '先确认 scope 并保全' -and $vendorRulesText -match '不得在证据保全前直接删除文件') {
+    Ok 'malware remediation preserves evidence before destructive actions'
+} else {
+    Bad 'malware remediation does not require evidence preservation before destructive actions'
+}
 $fieldLog | Set-Content -LiteralPath (Join-Path $ScratchDir 'template-fields.txt') -Encoding UTF8
 
 # --- role map skills exist for primary rows ---
