@@ -37,7 +37,7 @@
 |---|------|------|
 | G1 | 执行摘要 / 概述 | **MUST**：3–8 句：分析了什么、最严重结论、影响面、建议动作 |
 | G2 | 范围与授权 | **MUST**：链到 case `scope.md`（见模板 §0.1） |
-| G3 | Evidence→Finding→Path | **MUST**：见 `security-report-templates.md` §0 与 `ops/evidence-finding-path.md` |
+| G3 | Evidence→Finding→Path | **MUST**：见 `security-report-templates.md` §0 与 `skills/ops/evidence-finding-path.md` |
 | G4 | IOC 表 | `malware` / `apt` **MUST**；其他任务仅在存在相关指标时出现 |
 | G5 | 建议 / 处置 | `malware` / `apt` **MUST**：至少 1 条可执行建议；其他任务按原任务模板 |
 | G6 | 附录元数据 | **SHOULD**：工具与版本、样本哈希、完整复现命令 |
@@ -46,9 +46,9 @@
 ### 1.1 IOC 表最小列
 
 ```markdown
-| 类型 | 值 | 上下文 | 置信度 |
-|------|----|--------|--------|
-| file_sha256 / file_md5 / domain / ip:port / url / mutex / path / registry | … | 何处发现 | high/med/low |
+| 类型 | 值 | 上下文 | 首次/最后发现 | 来源证据 | 置信度 |
+|------|----|--------|---------------|----------|--------|
+| file_sha256 / file_md5 / domain / ip:port / url / mutex / path / registry | … | 何处发现 | YYYY-MM-DD / n/a | E-id | high/med/low |
 ```
 
 ### 1.2 版权与安全边界
@@ -203,7 +203,15 @@ if flavor in (malware, apt):
 
 ---
 
-## 7. 非目标
+## 7. 来源登记
+
+- Kaspersky Securelist, “Updated MATA attacks industrial companies in Eastern Europe”: <https://securelist.com/updated-mata-attacks-industrial-companies-in-eastern-europe/110829>（结构参考；访问日期：2026-08-11）
+- 火绒安全公开技术文章入口：<https://www.huorong.cn/>（站点入口；访问日期：2026-08-11。具体文章 URL、标题和访问日期应在实际引用时登记）
+- ATT&CK 技术编号仅作为规范化映射，必须由本次 Evidence 支撑；不得把外部报告中的 IOC 自动带入当前报告。
+
+---
+
+## 8. 非目标
 
 - 不维护 Mandiant/CrowdStrike/奇安信等额外全文模板（结构已由双 flavor 覆盖常见需求）。
 - 不自动爬取厂商站点填报告。
