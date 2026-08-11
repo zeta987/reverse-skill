@@ -8,47 +8,47 @@
 
 | Flavor | 主参考 | 场景 |
 |--------|--------|------|
-| `malware`（**默认**） | 火绒安全病毒/技术分析报告 | 普通木马、白加黑、钓鱼投毒、单样本逆向 |
+| `malware` | 火绒安全病毒/技术分析报告 | 明确的普通木马、白加黑、钓鱼投毒、恶意样本 |
 | `apt` | 卡巴斯基 Securelist / APT 战役报告（如 MATA） | APT、团伙战役、多阶段感染链、行业定向 |
 
-原则：**模板在精不在多** —— 仅 2 个 flavor + 1 份通用专业元素，不为第三家厂商再复制全文模板。
+原则：**模板在精不在多** —— 仅 2 个厂商 flavor + 1 份通用专业元素；普通逆向、渗透、CTF 和 JS 报告保持任务模板，不默认伪装成恶意软件报告。
 
 ---
 
 ## 0. 何时启用
 
-在 `docs-generator` 生成**安全类**报告时（逆向 / 恶意软件 / 渗透收尾 / 用户明确要求「专业报告」「厂商风格」）**MUST** 读取本文件并选定 flavor。
+在 `docs-generator` 生成**安全类**报告时（逆向 / 恶意软件 / 渗透收尾 / 用户明确要求「专业报告」「厂商风格」）**MUST** 读取本文件。只有任务证据或用户明确要求支持时才选择厂商 flavor；否则使用 `flavor = null`，仅叠加通用专业元素和原任务模板。
 
 | 信号 | Flavor |
 |------|--------|
 | APT / 团伙 / 战役 / 多阶段 C2 / 行业定向 / ICS / spear-phish 战役 | `apt` |
-| 单样本、木马、窃密、白加黑、仿冒站点、日常程序分析 | `malware`（默认） |
-| 渗透测试 / CTF / JS 签名 | **不换 flavor 全文骨架**；仍套用下方「通用专业元素」最小集 + 原任务模板 |
+| 明确恶意样本、木马、窃密、白加黑、仿冒站点 | `malware` |
+| 普通 APK/ELF/PE/Mach-O 逆向、算法分析、固件分析、渗透测试、CTF、JS 签名 | `flavor = null`；使用原任务模板和通用专业元素最小集 |
 
 用户显式指定「按卡巴/APT」「按火绒/病毒报告」时，覆盖自动选型。
 
 ---
 
-## 1. 通用专业元素（所有安全报告）
+## 1. 通用专业元素（Base）
 
-下列元素 **SHOULD** 出现；标 **MUST** 的不可省略（可用一行 `n/a` + 原因占位，禁止整节消失）。
+下列 Base 元素按报告类型应用。标 **MUST** 的不可省略；与特定 flavor 相关的元素不得为了填模板而出现在无关任务中。没有适用内容时，使用 `n/a` 并说明原因。
 
 | # | 元素 | 要求 |
 |---|------|------|
 | G1 | 执行摘要 / 概述 | **MUST**：3–8 句：分析了什么、最严重结论、影响面、建议动作 |
 | G2 | 范围与授权 | **MUST**：链到 case `scope.md`（见模板 §0.1） |
-| G3 | Evidence→Finding→Path | **MUST**：见 `security-report-templates.md` §0 与 `ops/evidence-finding-path.md` |
-| G4 | IOC 表 | **MUST** 有表头；无指标时一行 `n/a` + 原因（未做流量/无外联等） |
-| G5 | 建议 / 处置 | **MUST**：至少 1 条可执行建议（检测、缓解或应急步骤） |
+| G3 | Evidence→Finding→Path | **MUST**：见 `security-report-templates.md` §0 与 `skills/ops/evidence-finding-path.md` |
+| G4 | IOC 表 | `malware` / `apt` **MUST**；其他任务仅在存在相关指标时出现 |
+| G5 | 建议 / 处置 | `malware` / `apt` **MUST**：至少 1 条可执行建议；其他任务按原任务模板 |
 | G6 | 附录元数据 | **SHOULD**：工具与版本、样本哈希、完整复现命令 |
-| G7 | ATT&CK 映射 | **SHOULD**（`apt` 下升级为有表可 `n/a` 的硬章节）；技术 ID + 简短证据指针 |
+| G7 | ATT&CK 映射 | **MUST**（`apt` 下；无适用技术时 `n/a` + 原因）；其他任务 **SHOULD** |
 
 ### 1.1 IOC 表最小列
 
 ```markdown
-| 类型 | 值 | 上下文 | 置信度 |
-|------|----|--------|--------|
-| file_sha256 / file_md5 / domain / ip:port / url / mutex / path / registry | … | 何处发现 | high/med/low |
+| 类型 | 值 | 上下文 | 首次/最后发现 | 来源证据 | 置信度 |
+|------|----|--------|---------------|----------|--------|
+| file_sha256 / file_md5 / domain / ip:port / url / mutex / path / registry | … | 何处发现 | YYYY-MM-DD / n/a | E-id | high/med/low |
 ```
 
 ### 1.2 版权与安全边界
@@ -59,7 +59,7 @@
 
 ---
 
-## 2. Flavor：`malware`（火绒式 · 默认）
+## 2. Flavor：`malware`（火绒式 · 明确选择）
 
 **叙事目标**：让读者 5 分钟内看懂「是什么 → 怎么来的 → 样本怎么干的 → 怎么处置 → 有哪些 IOC」。
 
@@ -85,7 +85,7 @@
 ### 3.4 核心发现（Findings 表或编号列表，挂 evidence_ids）
 
 ## 4. 应急处置方式
-（编号可执行步骤：断网 → 杀进程 → 清文件 → 查 hosts/启动项 → 全盘查杀 → 复核）
+（仅在授权范围内执行：先确认 scope 并保全样本、内存、进程树、网络连接和日志等证据，再隔离主机；经负责人批准后再终止进程、隔离/清除文件、检查 hosts/启动项、全盘查杀并复核。不得在证据保全前直接删除文件。）
 
 ## 5. 总结说明
 （给普通用户/运维的风险提醒与预防）
@@ -164,10 +164,10 @@
 
 | 任务模板（`security-report-templates.md`） | 叠加方式 |
 |------------------------------------------|----------|
-| 1. 逆向工程报告 | 默认 `malware`：用 §2 顺序重排；原「静态/动态/复现」并入 §3/附录；**保留**导入表等硬门产出为 Evidence |
-| 2. 渗透测试报告 | 不套 APT 全文；补 G1（若缺）、G4（若有基础设施 IOC）、G5；攻击路径对齐 §0 Path |
-| 3. CTF Writeup | 仅 G1 一句概述 + 可复现；不强制 IOC/ATT&CK |
-| 4. JS/Web 签名逆向 | 默认偏 `malware` 精简：概述 → 定位 → 算法 → 复现 → IOC(n/a 常见) |
+| 1. 逆向工程报告 | 默认 `flavor = null`，保留原「静态/动态/复现」骨架和导入表等硬门 Evidence；只有明确恶意样本才套 §2 |
+| 2. 渗透测试报告 | `flavor = null`；补 Base 中适用的 G1–G3，攻击路径对齐 §0 Path，不强制 IOC |
+| 3. CTF Writeup | `flavor = null`；保留原题目、解题思路和复现结构，不强制 IOC/ATT&CK |
+| 4. JS/Web 签名逆向 | `flavor = null`；使用原概述 → 定位 → 算法 → 复现骨架，不套 malware |
 | 恶意软件 / APT 专项 | 显式选 `malware` 或 `apt` 全文骨架 |
 
 **冲突解决**：§0 Evidence 链字段与 scope 门禁 **永远优先**；flavor 只改叙事顺序与专业外壳，不得删除 E/F/P。
@@ -177,15 +177,15 @@
 ## 5. 选型伪代码
 
 ```
-if user_requests_kaspersky or apt or campaign:
+if user_requests_kaspersky or apt or threat_campaign:
     flavor = apt
-elif user_requests_huorong or vir_report or single_malware:
+elif user_requests_huorong or vir_report or explicit_malware:
     flavor = malware
-elif task in (pentest, ctf, js_sign):
-    flavor = null  # 任务模板 + 通用元素最小集
 else:
-    flavor = malware  # 默认
-emit(report with G1–G7 and flavor outline)
+    flavor = null  # 原任务模板 + Base 中适用的元素
+emit(base_report)
+if flavor in (malware, apt):
+    emit(report with flavor outline)
 ```
 
 ---
@@ -195,14 +195,23 @@ emit(report with G1–G7 and flavor outline)
 - [ ] 已选 flavor 或显式「任务模板 + 最小集」
 - [ ] G1 概述存在且非空话
 - [ ] §0 E/F/P 字段完整
-- [ ] IOC 表存在（或 n/a+原因）
-- [ ] 有可执行建议/处置
+- [ ] `malware` / `apt` 报告有 IOC 表（或 n/a+原因）
+- [ ] `malware` / `apt` 报告有可执行建议/处置
+- [ ] 无 flavor 的任务没有被套入 malware/APT 专属章节
 - [ ] 无厂商原文粘贴、无 placeholder/TODO
 - [ ] 导入表等硬门 Evidence 已进入静态/技术分析（若本任务做过二进制分析）
 
 ---
 
-## 7. 非目标
+## 7. 来源登记
+
+- Kaspersky Securelist, “Updated MATA attacks industrial companies in Eastern Europe”: <https://securelist.com/updated-mata-attacks-industrial-companies-in-eastern-europe/110829>（结构参考；访问日期：2026-08-11）
+- 火绒安全公开技术文章入口：<https://www.huorong.cn/>（站点入口；访问日期：2026-08-11。具体文章 URL、标题和访问日期应在实际引用时登记）
+- ATT&CK 技术编号仅作为规范化映射，必须由本次 Evidence 支撑；不得把外部报告中的 IOC 自动带入当前报告。
+
+---
+
+## 8. 非目标
 
 - 不维护 Mandiant/CrowdStrike/奇安信等额外全文模板（结构已由双 flavor 覆盖常见需求）。
 - 不自动爬取厂商站点填报告。

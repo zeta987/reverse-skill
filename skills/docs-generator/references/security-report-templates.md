@@ -38,11 +38,11 @@
 
 | Flavor | 场景 | 骨架一句话 |
 |--------|------|------------|
-| `malware`（默认） | 普通木马/白加黑/单样本 | 火绒式：概述→流程→样本分析→应急处置→IOC |
+| `malware` | 明确恶意样本/普通木马/白加黑 | 火绒式：概述→流程→样本分析→应急处置→IOC |
 | `apt` | APT/战役/多阶段链 | 卡巴式：摘要→感染链→调查→Interesting findings→技术分析→检测缓解→IOC |
-| 无全文 flavor | 渗透/CTF/JS 签名 | 本节任务模板 + 通用元素最小集 |
+| `flavor = null` | 普通逆向/渗透/CTF/JS 签名 | 本节任务模板 + 适用的 Base 通用元素 |
 
-**通用元素（G1–G7）摘要**：执行摘要 MUST · Scope MUST · E/F/P MUST · IOC 表 MUST（可 n/a）· 可执行建议 MUST · 附录 SHOULD · ATT&CK SHOULD（apt 建议有表）
+**通用元素（G1–G7）摘要**：G1 执行摘要 MUST · G2 Scope MUST · G3 E/F/P MUST · G4 IOC 仅 `malware`/`apt` MUST · G5 建议仅 `malware`/`apt` MUST · G6 附录 SHOULD · G7 ATT&CK 在 `apt` MUST
 
 选型与章节顺序以 `vendor-report-rules.md` 为准；与 §0.1–0.5 冲突时 **Evidence 契约优先**。
 
@@ -123,11 +123,11 @@
 
 ## 1b. 恶意软件 / APT 报告（厂商 flavor）
 
-当任务为恶意软件分析、病毒报告、APT/战役分析时，**不要**仅用上面「逆向工程」骨架交差：
+当任务为恶意软件分析、病毒报告、APT/战役分析时，**不要**仅用上面「逆向工程」骨架交差；普通逆向任务保持原模板，不自动选择 vendor flavor：
 
 1. 读 `vendor-report-rules.md` 选 `malware` 或 `apt`
 2. 按对应章节顺序输出
-3. 仍 **MUST** 含 §0 Evidence 链与 IOC 表
+3. 仍 **MUST** 含 §0 Evidence 链；`malware` / `apt` flavor 另 **MUST** 含 IOC 表
 4. 二进制样本的静态分析 **MUST** 含导入表 Evidence（与 radare2/ida/malware 硬门一致）
 
 ## 2. 渗透测试报告模板
