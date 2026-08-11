@@ -115,6 +115,15 @@ jobs:
           bash skills/scripts/case-guard.sh --case-root "$scratch/project/work/network-default"
 
           bash skills/scripts/case-init.sh \
+            --hint "authorized web review" \
+            --case-name "uppercase-network" \
+            --package-root "$scratch/project" \
+            --auth-granted \
+            --network-profile "AUTHORIZED_TARGET_ONLY" \
+            --target-url "https://example.test/"
+          grep -Eq '^- mode: authorized_target_only$' "$scratch/project/work/uppercase-network/scope.md"
+
+          bash skills/scripts/case-init.sh \
             --hint "pending review" \
             --case-name "guard-section" \
             --package-root "$scratch/project" \
