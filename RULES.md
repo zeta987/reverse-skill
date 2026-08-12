@@ -217,6 +217,8 @@ After task completion (vulnerability verified / reverse complete / flag captured
 | "I'll reply to user first, continue after confirmation" | **Don't wait for confirmation on deterministic steps.** Execute while informing user. Only pause at genuine decision points. |
 | "I understand the rules, please tell me your task" | **This is the WORST failure mode.** Correct behavior: proactively match user intent to routing table, output analysis, start executing. |
 | "User asked to redo import-table / step X, but I did something else more useful" | **Redo = redo the named step.** When user asks to redo X (e.g. import table check), MUST re-execute X and refresh its Evidence. FORBIDDEN to substitute another step or silently skip X. |
+| "IAT repair keeps failing; I'll grind more static unpackers" | **IAT repair iron rule:** try auto/semi-auto repair first; on tool error or unreable binary after repair, STOP static IAT, record E-iat-repair-fail, switch to dynamic API breakpoints. FORBIDDEN infinite static IAT thrash. |
+| "No import table (.NET) so the hard gate does not apply" | **Equivalent anchor still MUST:** .NET → dnSpy/IL/metadata summary into E-imports slot; DLL/SYS → E-exports alongside imports. FORBIDDEN to skip the gate. |
 
 
 ---
