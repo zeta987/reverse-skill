@@ -1,7 +1,7 @@
 # RE Agent 工作流门闩（静态↔动态）
 
 > 来源启发：binary-re 阶段划分、社区 RE skill（Frida/r2/Ghidra/IDA 循环）、Cerberus 三头环（静/动/插桩）  
-> Issue #65 增量：IAT 修复铁律、六阶段映射、.NET/DLL·SYS 等价路径；用户指令可行性门闩；旁路补丁 6–10（2026-08-12）  
+> Issue #65 增量：IAT 修复铁律、六阶段映射、.NET/DLL·SYS 等价路径；用户指令可行性门闩；旁路补丁 6–10；反调试/混淆菜谱 A–T（2026-08-12）  
 > 适用：`reverse-engineering/`、`ida-reverse/`、`radare2/`、`malware-analysis/`、与 cre 角色交接
 
 ## 0. 启动
@@ -145,6 +145,34 @@
 | Dynamic 单步无进展 | ~200 条指令 | 回 Static 字符串/交叉引用重锚 |
 | 任一路径重复失败 | 记 Evidence 后换工具或旁路 | 禁止同一失败手法空转 |
 
+
+### 3.3 反调试 / 混淆旁路速查（Issue #65 补丁 A–T · 高频）
+
+完整索引与动作细节见 `reverse-engineering/anti-analysis.md`「Agent 响应菜谱 A–T」。此处只列 **P0 必查 + 常见转场**。默认 **授权隔离 lab**；patch/改标志位不是未授权生产动作。
+
+| 触发特征 | 首选动作（摘要） | Evidence |
+|----------|------------------|----------|
+| `cpuid` 后 jz/jnz（A） | lab：改标志位或 patch 走真实分支；记检测点地址 | `E-anti-debug-cpuid` |
+| `rdtsc` + sub/cmp（B） | bp rdtsc 或 hook 时间源；禁止无限空转等沙箱超时当「无害」 | `E-anti-debug-rdtsc` |
+| PEB BeingDebugged / NtGlobalFlag（K） | ScyllaHide 或手改 PEB；patch 条件跳 | `E-anti-debug-peb` |
+| `NtQueryInformationProcess` DebugPort/Flags/Object（P） | ScyllaHide / hook 返回值；记 class 参数 | `E-anti-debug-ntqip` |
+| 导入极少但行为丰富 → API 哈希（N） | bp GetProcAddress；哈希反查回注 IDA | `E-api-hash` |
+| strings 空但有网/文件行为 → 串加密（I） | 找 decode 例程 xref；解密后 dump 回注 | `E-string-decrypt` |
+| 有签名但来源可疑（F） | SigCheck：有效/吊销/时间；**无效不降**威胁等级 | `E-sig-forge` |
+| 标准 strings 无 IOC → 试宽字符（T） | `strings -el` / UTF-16LE；Alt+A unicode | `E-wide-strings` |
+| 调试器名字符串 / Toolhelp 扫描（C） | bp CreateToolhelp32Snapshot 链 | `E-anti-debug-procscan` |
+| AddVectoredExceptionHandler + 故意异常（D） | bp VEH 注册；分析 handler | `E-anti-debug-veh` |
+| int3 / DR0–DR7（M） | patch int3；软断点或 ScyllaHide 藏硬件 BP | `E-anti-debug-bp` |
+| 多 PE 头/重叠节（G） | 节表真实映射 + 熵；不信节名 | `E-pe-anomaly` |
+| 文件尾 > 节总和 Overlay（J） | 提取 overlay；file/熵；找加载偏移 xref | `E-overlay` |
+| .rsrc 异常大/高熵 RT_RCDATA（Q） | 提取资源；FindResource 链 + 解密 dump | `E-rsrc-payload` |
+| 运行时才加载 DLL（R） | 查 Delay Import；bp delay-load helper | `E-delay-import` |
+| while+switch 星形 CFG（H） | **See** `ollvm-deobfuscation.md`；插件失败则动态路径 | `E-cff` |
+| 恒真/恒假分支（S） | **See** ollvm / 符号执行；动态为准 | `E-opaque-pred` |
+| `/proc/self/status` TracerPid（L） | **Linux/ELF**；hook 或 patch；Windows 主路径不强制 | `E-anti-debug-tracerpid` |
+
+**约束**：绕过失败也记 Evidence；禁止把「反调试触发退出」写成「样本无害」。完整 A–T 与 P2（E 编译时间、O 花指令）见 anti-analysis 菜谱节。
+
 ## 4. Synthesis（IOC / 攻击链 / 报告）
 
 ```text
@@ -163,7 +191,7 @@
 | 1 初步快速研判 | §0–§1 Triage | Hash、架构、文件类型、查壳；imports/等价锚点；§0.5 指令门闩 |
 | 2 脱壳与 IAT | §1.2 | IAT 铁律；失败/自校验闪退 → Evidence → Dynamic |
 | 3 基础静态锚点 | §2 Static | 高危 API 组合；时间盒 SHOULD |
-| 4 深度交叉验证 | §3 Dynamic | 断点四级火箭；无行为应急；时间盒 SHOULD |
+| 4 深度交叉验证 | §3 Dynamic | 断点四级火箭；无行为应急；时间盒；§3.3 A–T 旁路速查 |
 | 5 提取 IoC 与攻击链 | §4 Synthesis | IOC + Kill Chain / Path |
 | 6 归档与规则化 | §4 + docs-generator / YARA | 结构化报告；规则可选 |
 
