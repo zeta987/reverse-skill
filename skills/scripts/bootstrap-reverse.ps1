@@ -781,6 +781,13 @@ function Start-AnythingAnalyzerService {
         return
     }
 
+    $repoDir = [string]$Definition.installDir
+    $checkoutDefinition = [pscustomobject]@{
+        repo         = [string]$Definition.repoUrl
+        pinnedCommit = [string]$Definition.pinnedCommit
+    }
+    Ensure-GitCloneInstall -Definition $checkoutDefinition -TargetPath $repoDir | Out-Null
+
 Ensure-Pnpm
 $vsBuildToolsError = ''
 if (Test-ReverseIsWindows) {
@@ -792,26 +799,6 @@ if (Test-ReverseIsWindows) {
         Write-Warning "Visual Studio Build Tools auto-install failed; continuing with pnpm prebuilt/native rebuild path. $vsBuildToolsError"
     }
 }
-
-    $repoDir = @($Definition.startupDirCandidates) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-    if ([string]::IsNullOrWhiteSpace($repoDir)) {
-        $installDir = $Definition.installDir
-        $gh = Get-FirstCommandPath -Names @('gh')
-        $git = Get-FirstCommandPath -Names @('git')
-        if ($gh) {
-            & $gh repo clone 'Mouseww/anything-analyzer' $installDir
-        }
-        elseif ($git) {
-            & $git clone $Definition.repoUrl $installDir
-        }
-        else {
-            throw 'Cannot clone anything-analyzer because neither gh nor git is available.'
-        }
-        if ($LASTEXITCODE -ne 0) {
-            throw 'Failed to clone anything-analyzer.'
-        }
-        $repoDir = $installDir
-    }
 
     $pnpm = Get-NodeCommandPath -Name 'pnpm'
     if ([string]::IsNullOrWhiteSpace($pnpm)) {

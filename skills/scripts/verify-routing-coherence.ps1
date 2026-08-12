@@ -389,6 +389,7 @@ if (Test-Path -LiteralPath $kaliManifest) {
 # --- supply-chain pin gate: auto-install download sources MUST be pinned ---
 # 统一判定：pinnedVersion / pinnedCommit / pinPolicy 三选一；
 # github-release-* 额外接受 assetSha256 / preferApiDigest（GitHub 官方发布资产哈希）。
+# local-http-mcp 只有在不获取外部源码时才可免 pin。
 $pinKinds = @('pip-package', 'npm-mcp', 'npm-global', 'go-install', 'git-clone')
 foreach ($mf in @($skillsManifest, $kaliManifest)) {
     if (-not (Test-Path -LiteralPath $mf)) { continue }
@@ -401,7 +402,10 @@ foreach ($mf in @($skillsManifest, $kaliManifest)) {
             'github-release-zip' { $hasPin = $hasPin -or $cap.assetSha256 -or $cap.preferApiDigest }
             'github-release-jar-wrapper' { $hasPin = $hasPin -or $cap.assetSha256 }
             'github-release-tar' { $hasPin = $hasPin -or $cap.assetSha256 -or $cap.preferApiDigest }
-            'local-http-mcp' { $hasPin = $true }   # 本地服务，不下载
+            'local-http-mcp' {
+                $fetchesExternalSource = $cap.repoUrl -or $cap.repo
+                $hasPin = (-not $fetchesExternalSource) -or $cap.pinnedCommit -or $cap.pinnedVersion
+            }
             'winget-package' { $hasPin = $hasPin } # winget-latest 属于 pinPolicy
             'apt-package' { $hasPin = $true }      # 发行版仓库自带（Kali 侧）
             'docker-image' { $hasPin = $true }     # fallback 通道

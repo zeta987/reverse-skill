@@ -23,6 +23,7 @@ Desktop.ini
 *.tmp
 *.bak
 *.log
+implementation-notes.md
 
 # User-specific config
 .claude/

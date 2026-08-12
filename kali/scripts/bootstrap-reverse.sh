@@ -22,6 +22,7 @@ CAPABILITIES=()
 START_SERVICES=false
 SKIP_REFRESH=false
 MANUAL_REQUIRED=false
+FAILED=false
 LAST_CAPABILITY_MANUAL=false
 
 for arg in "$@"; do
@@ -630,11 +631,10 @@ start_anything_analyzer() {
     fi
 
     local repo_dir="$HOME/tools/anything-analyzer"
-
-    if [[ ! -d "$repo_dir" ]]; then
-        log_info "克隆 anything-analyzer ..."
-        git clone https://github.com/Mouseww/anything-analyzer.git "$repo_dir"
-    fi
+    local repo commit
+    repo=$(manifest_field anything-analyzer repoUrl)
+    commit=$(manifest_field anything-analyzer pinnedCommit)
+    install_git_commit "$repo" "$commit" "$repo_dir" || return 1
 
     if ! command -v pnpm &>/dev/null; then
         npm install -g pnpm
@@ -681,6 +681,7 @@ for cap in "${CAPABILITIES[@]}"; do
         fi
     else
         RESULTS+=("{\"name\":\"$cap\",\"status\":\"failed\"}")
+        FAILED=true
     fi
 done
 
@@ -691,7 +692,9 @@ if [[ "$SKIP_REFRESH" != "true" ]]; then
 fi
 
 final_exit_code=0
-if [[ "$MANUAL_REQUIRED" == "true" ]]; then
+if [[ "$FAILED" == "true" ]]; then
+    final_exit_code=1
+elif [[ "$MANUAL_REQUIRED" == "true" ]]; then
     final_exit_code=2
 fi
 
