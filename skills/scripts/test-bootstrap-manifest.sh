@@ -19,6 +19,11 @@ name="$(basename "$0")"
 case "$name:${1:-}" in
   pipx:--version) printf '%s\n' "${STUB_PIPX_VERSION:-0}" ;;
   pnpm:--version) printf '%s\n' "${STUB_PNPM_VERSION:-0}" ;;
+  brew:install)
+    if [[ "${2:-}" == python ]]; then
+      ln -sf "$STUB_PYTHON_SOURCE" "$STUB_ACTIVE_BIN/python3"
+    fi
+    ;;
   git:init)
     target="${!#}"; mkdir -p "$target/.git"; printf '%s\n' unpinned-head > "$target/.stub-head"
     ;;
@@ -43,6 +48,7 @@ esac
 STUB
 chmod +x "$STUB_BIN/command-stub"
 for name in git node npm npx pipx pnpm sleep nc; do ln -s command-stub "$STUB_BIN/$name"; done
+ln -s command-stub "$STUB_BIN/brew"
 
 cat > "$STUB_BIN/python3" <<STUB
 #!/usr/bin/env bash
@@ -67,6 +73,7 @@ PY
 
 run_generic() {
   env PATH="$STUB_BIN:/usr/bin:/bin" HOME="$SCRATCH/home" CALL_LOG="$CALL_LOG" \
+    STUB_ACTIVE_BIN="$STUB_BIN" STUB_PYTHON_SOURCE="$STUB_BIN/python3" \
     STUB_PIPX_VERSION="${STUB_PIPX_VERSION:-}" STUB_PNPM_VERSION="${STUB_PNPM_VERSION:-}" \
     STUB_FAIL_PIP_INSTALL="${STUB_FAIL_PIP_INSTALL:-0}" STUB_FAIL_FETCH="${STUB_FAIL_FETCH:-0}" \
     REVERSE_SKILL_TOOLS_DIR="${TEST_TOOLS_ROOT:-$SCRATCH/tools}" \
@@ -90,6 +97,45 @@ pipx_package=$(json_value dependency pipx)
 pnpm_package=$(json_value dependency pnpm)
 anything_repo=$(json_value anything-analyzer repoUrl)
 anything_pin=$(json_value anything-analyzer pinnedCommit)
+
+# The manifest parser is bootstrapped before a Node-only sink, without installing pipx.
+NO_PYTHON_BIN="$SCRATCH/no-python-bin"
+PARSER_FIXTURE="$SCRATCH/parser-bootstrap"
+mkdir -p "$NO_PYTHON_BIN"
+for name in git node npm npx pipx pnpm sleep nc brew; do ln -s "$STUB_BIN/command-stub" "$NO_PYTHON_BIN/$name"; done
+for tool in bash uname dirname mktemp rm head tr basename mkdir cat ln; do ln -s "$(command -v "$tool")" "$NO_PYTHON_BIN/$tool"; done
+mkdir -p "$PARSER_FIXTURE"
+cp "$BOOTSTRAP" "$PARSER_FIXTURE/bootstrap-reverse.sh"
+cp "$MANIFEST" "$PARSER_FIXTURE/bootstrap-manifest.json"
+: > "$CALL_LOG"
+env PATH="$NO_PYTHON_BIN" HOME="$SCRATCH/home" CALL_LOG="$CALL_LOG" \
+  STUB_ACTIVE_BIN="$NO_PYTHON_BIN" STUB_PYTHON_SOURCE="$STUB_BIN/python3" \
+  REVERSE_SKILL_TOOLS_DIR="$SCRATCH/tools" CLAUDE_MCP_CONFIG="$SCRATCH/home/mcp.json" \
+  bash "$PARSER_FIXTURE/bootstrap-reverse.sh" agent-browser --skip-refresh >/dev/null
+expect_line 'brew|install|python'
+expect_line "npm|install|-g|$(json_value agent-browser npmPackage)"
+! grep -Fq '|pip|install|' "$CALL_LOG"
+
+# A required empty manifest field fails before any package-manager sink.
+BROKEN_DIR="$SCRATCH/broken-bootstrap"
+mkdir -p "$BROKEN_DIR"
+cp "$BOOTSTRAP" "$BROKEN_DIR/bootstrap-reverse.sh"
+"$REAL_PYTHON" - "$MANIFEST" "$BROKEN_DIR/bootstrap-manifest.json" <<'PY'
+import json, pathlib, sys
+data = json.loads(pathlib.Path(sys.argv[1]).read_text())
+next(x for x in data['capabilities'] if x['name'] == 'agent-browser')['npmPackage'] = ''
+pathlib.Path(sys.argv[2]).write_text(json.dumps(data))
+PY
+: > "$CALL_LOG"
+set +e
+env PATH="$STUB_BIN:/usr/bin:/bin" HOME="$SCRATCH/home" CALL_LOG="$CALL_LOG" \
+  STUB_ACTIVE_BIN="$STUB_BIN" STUB_PYTHON_SOURCE="$STUB_BIN/python3" \
+  REVERSE_SKILL_TOOLS_DIR="$SCRATCH/tools" CLAUDE_MCP_CONFIG="$SCRATCH/home/mcp.json" \
+  bash "$BROKEN_DIR/bootstrap-reverse.sh" agent-browser --skip-refresh >/dev/null 2>&1
+broken_rc=$?
+set -e
+[[ $broken_rc -ne 0 ]]
+! grep -Eq '^npm\|install\|-g(\||$)' "$CALL_LOG"
 
 # Table: each generic package-manager sink receives its canonical manifest value.
 while IFS='|' read -r capability field expected; do

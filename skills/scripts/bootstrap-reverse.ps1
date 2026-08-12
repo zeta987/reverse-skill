@@ -23,6 +23,7 @@ $ErrorActionPreference = 'Stop'
 $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 . (Join-Path $PSScriptRoot 'lib\ToolDiscovery.ps1')
+. (Join-Path $PSScriptRoot 'lib\BootstrapSupplyChain.ps1')
 
 function Get-BootstrapDependency {
     param([Parameter(Mandatory = $true)][string]$Name)
@@ -161,29 +162,6 @@ function Ensure-PythonRuntime {
 function Ensure-JavaRuntime {
     if (-not (Get-FirstCommandPath -Names @('java'))) {
         Ensure-WingetPackage -Id 'Microsoft.OpenJDK.21' -Label 'OpenJDK 21'
-    }
-}
-
-function Ensure-Pnpm {
-    Ensure-NodeRuntime
-    $dependency = Get-BootstrapDependency -Name 'pnpm'
-    $pnpm = Get-NodeCommandPath -Name 'pnpm'
-    $currentVersion = ''
-    if ($pnpm) {
-        $versionLine = & $pnpm --version 2>$null | Select-Object -First 1
-        if ($LASTEXITCODE -eq 0 -and $null -ne $versionLine) {
-            $currentVersion = ([string]$versionLine).Trim()
-        }
-    }
-    if ($currentVersion -ne [string]$dependency.version) {
-        $npm = Get-NodeCommandPath -Name 'npm'
-        if ([string]::IsNullOrWhiteSpace($npm)) {
-            throw 'npm is not available after Node.js installation.'
-        }
-        & $npm install -g ([string]$dependency.package)
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to install pinned pnpm dependency $($dependency.package)."
-        }
     }
 }
 
@@ -801,54 +779,9 @@ if (Test-ReverseIsWindows) {
     if ([string]::IsNullOrWhiteSpace($pnpm)) {
         throw 'pnpm is not available after installation.'
     }
-
-    $workspacePath = Join-Path $repoDir 'pnpm-workspace.yaml'
-    $workspaceExisted = Test-Path -LiteralPath $workspacePath -PathType Leaf
-    $workspaceBytes = if ($workspaceExisted) { [IO.File]::ReadAllBytes($workspacePath) } else { $null }
-
-    Push-Location $repoDir
-    try {
-        Approve-AnythingAnalyzerBuildScripts -RepoDir $repoDir
-
-        if (-not (Test-AnythingAnalyzerElectronHealthy -RepoDir $repoDir -PnpmPath $pnpm)) {
-            $nodeModules = Join-Path $repoDir 'node_modules'
-            if (Test-Path -LiteralPath $nodeModules) {
-                Remove-Item -LiteralPath $nodeModules -Recurse -Force
-            }
-        }
-
-        & $pnpm install --frozen-lockfile
-        if ($LASTEXITCODE -ne 0) {
-            if (-not [string]::IsNullOrWhiteSpace($vsBuildToolsError)) {
-                throw "pnpm install failed for anything-analyzer. Visual Studio Build Tools auto-install also failed earlier: $vsBuildToolsError"
-            }
-            throw 'pnpm install failed for anything-analyzer.'
-        }
-
-        & $pnpm rebuild electron esbuild better-sqlite3
-        if ($LASTEXITCODE -ne 0) {
-            if (-not [string]::IsNullOrWhiteSpace($vsBuildToolsError)) {
-                throw "pnpm rebuild failed for anything-analyzer. Visual Studio Build Tools auto-install also failed earlier: $vsBuildToolsError"
-            }
-            throw 'pnpm rebuild failed for anything-analyzer.'
-        }
-
-        if (-not (Test-AnythingAnalyzerElectronHealthy -RepoDir $repoDir -PnpmPath $pnpm)) {
-            throw 'Electron is still not healthy after reinstall/rebuild.'
-        }
-    }
-    finally {
-        Pop-Location
-        if ($workspaceExisted) {
-            [IO.File]::WriteAllBytes($workspacePath, $workspaceBytes)
-        }
-        elseif (Test-Path -LiteralPath $workspacePath) {
-            Remove-Item -LiteralPath $workspacePath -Force
-        }
-    }
-
     $git = Get-FirstCommandPath -Names @('git')
-    Assert-GitCheckoutState -GitPath $git -CheckoutPath $repoDir -PinnedCommit ([string]$Definition.pinnedCommit)
+    Invoke-AnythingAnalyzerPinnedInstall -RepoDir $repoDir -PnpmPath $pnpm -GitPath $git `
+        -PinnedCommit ([string]$Definition.pinnedCommit) -VsBuildToolsError $vsBuildToolsError
 
     $stdoutLog = Join-Path $repoDir 'anything-analyzer-dev.log'
     $stderrLog = Join-Path $repoDir 'anything-analyzer-dev.err.log'
@@ -887,82 +820,6 @@ function Ensure-AndroidPlatformTools {
 
     Ensure-WingetPackage -Id 'Google.PlatformTools' -Label 'Android SDK Platform-Tools'
     return (Resolve-ReverseToolSpec -Name 'adb')
-}
-
-function Assert-GitCheckoutState {
-    param(
-        [Parameter(Mandatory = $true)][string]$GitPath,
-        [Parameter(Mandatory = $true)][string]$CheckoutPath,
-        [Parameter(Mandatory = $true)][string]$PinnedCommit
-    )
-
-    $resolvedLine = & $GitPath -C $CheckoutPath rev-parse HEAD 2>$null | Select-Object -First 1
-    $resolvedCommit = if ($null -eq $resolvedLine) { '' } else { ([string]$resolvedLine).Trim() }
-    if ($LASTEXITCODE -ne 0 -or $resolvedCommit -ne $PinnedCommit) {
-        throw "Checkout verification failed: expected $PinnedCommit, got $resolvedCommit ($CheckoutPath)"
-    }
-    $status = @(& $GitPath -C $CheckoutPath status --porcelain --untracked-files=all 2>&1)
-    if ($LASTEXITCODE -ne 0) {
-        throw "Cannot inspect checkout state: $CheckoutPath"
-    }
-    if ($status.Count -gt 0) {
-        throw "Checkout has local changes; refusing to execute it: $CheckoutPath"
-    }
-}
-
-function Ensure-GitCloneInstall {
-    param(
-        [Parameter(Mandatory = $true)]$Definition,
-        [Parameter(Mandatory = $true)][string]$TargetPath
-    )
-
-    $pinnedCommit = if ($Definition.PSObject.Properties['pinnedCommit']) { [string]$Definition.pinnedCommit } else { '' }
-    $git = Get-FirstCommandPath -Names @('git')
-    if ([string]::IsNullOrWhiteSpace($git)) {
-        throw "Cannot clone $($Definition.repo) because git is not available."
-    }
-
-    if ((Test-Path -LiteralPath $TargetPath -PathType Container) -and (Test-Path -LiteralPath (Join-Path $TargetPath '.git'))) {
-        if ([string]::IsNullOrWhiteSpace($pinnedCommit)) {
-            throw "Git capability $($Definition.repo) must define pinnedCommit before an existing checkout can be used."
-        }
-        Assert-GitCheckoutState -GitPath $git -CheckoutPath $TargetPath -PinnedCommit $pinnedCommit
-        return $true
-    }
-
-    if (Test-Path -LiteralPath $TargetPath) {
-        throw "Install path exists but is not a git checkout: $TargetPath"
-    }
-    if ([string]::IsNullOrWhiteSpace($pinnedCommit)) {
-        throw "Git capability $($Definition.repo) must define pinnedCommit."
-    }
-
-    $parent = Split-Path -Path $TargetPath -Parent
-    Ensure-DownloadDirectory -Path $parent
-    $stagePath = Join-Path $parent ('.reverse-bootstrap-{0}' -f [Guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Path $stagePath | Out-Null
-    try {
-        & $git init --quiet $stagePath
-        if ($LASTEXITCODE -ne 0) { throw 'git init failed' }
-        & $git -C $stagePath remote add origin $Definition.repo
-        if ($LASTEXITCODE -ne 0) { throw 'git remote add failed' }
-        & $git -C $stagePath fetch --depth 1 origin $pinnedCommit
-        if ($LASTEXITCODE -ne 0) { throw 'git fetch failed' }
-        & $git -C $stagePath checkout --quiet --detach FETCH_HEAD
-        if ($LASTEXITCODE -ne 0) { throw 'git checkout failed' }
-        Assert-GitCheckoutState -GitPath $git -CheckoutPath $stagePath -PinnedCommit $pinnedCommit
-        Move-Item -LiteralPath $stagePath -Destination $TargetPath
-        if ((Test-Path -LiteralPath $stagePath) -or -not (Test-Path -LiteralPath (Join-Path $TargetPath '.git') -PathType Container)) {
-            throw "Failed to promote staged checkout to $TargetPath"
-        }
-    }
-    finally {
-        if (Test-Path -LiteralPath $stagePath) {
-            Remove-Item -LiteralPath $stagePath -Recurse -Force
-        }
-    }
-
-    return $true
 }
 
 function Ensure-Capability {

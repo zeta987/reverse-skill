@@ -224,13 +224,7 @@ install_brew_cask() {
 }
 
 ensure_python_runtime() {
-  if ! has_cmd python3; then
-    case "$PLATFORM" in
-      macos) install_brew python ;;
-      linux) install_apt python3 ;;
-      *) log_err "Install Python 3 manually. See $(platform_doc)"; return 1 ;;
-    esac
-  fi
+  ensure_python_interpreter || return 1
   local pipx_package pipx_version current_version
   pipx_package=$(manifest_dependency pipx package) || return 1
   pipx_version=$(manifest_dependency pipx version) || return 1
@@ -243,6 +237,17 @@ ensure_python_runtime() {
   fi
   python3 -m pipx ensurepath >/dev/null 2>&1 || true
   export PATH="$HOME/.local/bin:$PATH"
+}
+
+ensure_python_interpreter() {
+  if ! has_cmd python3; then
+    case "$PLATFORM" in
+      macos) install_brew python ;;
+      linux) install_apt python3 ;;
+      *) log_err "Install Python 3 manually. See $(platform_doc)"; return 1 ;;
+    esac
+  fi
+  has_cmd python3 || { log_err "Python 3 installation completed without a usable python3 command."; return 1; }
 }
 
 ensure_node_runtime() {
@@ -567,10 +572,10 @@ ensure_jadx() {
   if has_cmd jadx; then log_ok "jadx ready: $(cmd_path jadx)"; return 0; fi
   ensure_java_runtime
   local repo re tag sha
-  repo=$(manifest_field jadx repo)
-  re=$(manifest_field jadx assetRegex)
-  tag=$(manifest_field jadx releaseTag)
-  sha=$(manifest_field jadx assetSha256)
+  repo=$(manifest_field jadx repo) || return 1
+  re=$(manifest_field jadx assetRegex) || return 1
+  tag=$(manifest_field jadx releaseTag) || return 1
+  sha=$(manifest_field jadx assetSha256) || return 1
   case "$PLATFORM" in
     macos) install_brew jadx || install_github_release "$repo" "$re" "$TOOLS_ROOT/jadx" "$tag" "$sha" ;;
     linux) install_github_release "$repo" "$re" "$TOOLS_ROOT/jadx" "$tag" "$sha" ;;
@@ -587,10 +592,10 @@ ensure_apktool() {
       ensure_dir "$TOOLS_ROOT/apktool"
       local meta url digest jar wrapper
       local repo tag sha re
-      repo=$(manifest_field apktool repo)
-      tag=$(manifest_field apktool releaseTag)
-      sha=$(manifest_field apktool assetSha256)
-      re=$(manifest_field apktool assetRegex)
+      repo=$(manifest_field apktool repo) || return 1
+      tag=$(manifest_field apktool releaseTag) || return 1
+      sha=$(manifest_field apktool assetSha256) || return 1
+      re=$(manifest_field apktool assetRegex) || return 1
       meta=$(latest_github_asset_meta "$repo" "$re" "$tag")
       url=$(printf '%s' "$meta" | cut -f1)
       digest=$(printf '%s' "$meta" | cut -f2)
@@ -609,7 +614,7 @@ ensure_frida_tools() {
   ensure_python_runtime || return 1
   if has_cmd frida && has_cmd frida-ps; then log_ok "frida-tools ready"; return 0; fi
   local package
-  package=$(manifest_field frida pipPackage)
+  package=$(manifest_field frida pipPackage) || return 1
   pipx install --force "$package" || return 1
   export PATH="$HOME/.local/bin:$PATH"
 }
@@ -618,7 +623,7 @@ ensure_idalib_mcp() {
   ensure_python_runtime || return 1
   if has_cmd ida-pro-mcp; then log_ok "ida-pro-mcp ready: $(cmd_path ida-pro-mcp)"; return 0; fi
   local source
-  source=$(manifest_field idalib-mcp pipSource)
+  source=$(manifest_field idalib-mcp pipSource) || return 1
   pipx install --force "$source" || return 1
   export PATH="$HOME/.local/bin:$PATH"
   log_warn "Post-install: run 'ida-pro-mcp --install', choose Streamable HTTP + Global, then restart IDA Pro."
@@ -627,7 +632,7 @@ ensure_idalib_mcp() {
 ensure_jshookmcp() {
   ensure_node_runtime || return 1
   local package
-  package=$(manifest_field jshookmcp npmPackage)
+  package=$(manifest_field jshookmcp npmPackage) || return 1
   write_mcp_server "jshook" "$(python3 - "$package" <<'PY'
 import json, sys
 print(json.dumps({'command':'npx','args':['-y',sys.argv[1]],'env':{'JSHOOK_BASE_PROFILE':'search'}}))
@@ -638,7 +643,7 @@ PY
 ensure_reqable_mcp() {
   ensure_node_runtime || return 1
   local package
-  package=$(manifest_field reqable-mcp npmPackage)
+  package=$(manifest_field reqable-mcp npmPackage) || return 1
   write_mcp_server "reqable-mcp" "$(python3 - "$package" <<'PY'
 import json, sys
 print(json.dumps({'command':'npx','args':['-y',sys.argv[1]]}))
@@ -650,8 +655,8 @@ PY
 ensure_anything_analyzer() {
   local dir="$TOOLS_ROOT/anything-analyzer"
   local repo commit
-  repo=$(manifest_field anything-analyzer repoUrl)
-  commit=$(manifest_field anything-analyzer pinnedCommit)
+  repo=$(manifest_field anything-analyzer repoUrl) || return 1
+  commit=$(manifest_field anything-analyzer pinnedCommit) || return 1
   if ! has_cmd git; then
     case "$PLATFORM" in macos) install_brew git ;; linux) install_apt git ;; esac
   fi
@@ -719,7 +724,7 @@ ensure_agent_browser() {
   ensure_node_runtime || return 1
   if has_cmd agent-browser; then log_ok "agent-browser ready"; return 0; fi
   local package
-  package=$(manifest_field agent-browser npmPackage)
+  package=$(manifest_field agent-browser npmPackage) || return 1
   npm install -g "$package" || return 1
   if has_cmd npx; then npx playwright install chromium || true; fi
   local setup="$SKILL_ROOT/browser-automation/scripts/setup.sh"
@@ -729,8 +734,8 @@ ensure_agent_browser() {
 ensure_ghidra_mcp() {
   ensure_java_runtime || return 1
   local repo regex
-  repo=$(manifest_field ghidra-mcp repo)
-  regex=$(manifest_field ghidra-mcp assetRegex)
+  repo=$(manifest_field ghidra-mcp repo) || return 1
+  regex=$(manifest_field ghidra-mcp assetRegex) || return 1
   case "$PLATFORM" in
     macos)
       if ! has_cmd ghidraRun && [[ ! -d /Applications/Ghidra.app ]]; then
@@ -752,8 +757,8 @@ ensure_seclists() {
   if [[ -d /usr/share/seclists ]]; then log_ok "SecLists ready"; return 0; fi
   if ! has_cmd git; then case "$PLATFORM" in macos) install_brew git ;; linux) install_apt git ;; esac; fi
   local repo commit
-  repo=$(manifest_field seclists repo)
-  commit=$(manifest_field seclists pinnedCommit)
+  repo=$(manifest_field seclists repo) || return 1
+  commit=$(manifest_field seclists pinnedCommit) || return 1
   install_git_commit "$repo" "$commit" "$dir" || return 1
 }
 
@@ -761,8 +766,8 @@ ensure_proxycat() {
   ensure_python_runtime || return 1
   if has_cmd proxycat; then log_ok "proxycat ready"; return 0; fi
   local repo commit
-  repo=$(manifest_field proxycat repo)
-  commit=$(manifest_field proxycat pinnedCommit)
+  repo=$(manifest_field proxycat repo) || return 1
+  commit=$(manifest_field proxycat pinnedCommit) || return 1
   pipx install "git+${repo}@${commit}" || {
     manual_required proxycat "Clone/install ProxyCat manually; verify command 'proxycat'."
     LAST_CAPABILITY_MANUAL=true
@@ -810,8 +815,8 @@ ensure_pentestswarm() {
     case "$PLATFORM" in macos) install_brew go ;; linux) install_apt golang-go ;; esac
   fi
   local go_package docker_image
-  go_package=$(manifest_field pentestswarm goPackage)
-  docker_image=$(manifest_field pentestswarm dockerImage)
+  go_package=$(manifest_field pentestswarm goPackage) || return 1
+  docker_image=$(manifest_field pentestswarm dockerImage) || return 1
   if go install "$go_package"; then
     local go_bin
     go_bin="$(go env GOBIN 2>/dev/null || true)"
@@ -857,7 +862,7 @@ ensure_pwntools() {
   ensure_python_runtime || return 1
   if python3 -c "import pwn" 2>/dev/null; then log_ok "pwntools ready"; return 0; fi
   local package
-  package=$(manifest_field pwntools pipPackage)
+  package=$(manifest_field pwntools pipPackage) || return 1
   pipx install "$package" || python3 -m pip install --user "$package" || return 1
 }
 
@@ -936,6 +941,11 @@ while IFS= read -r capability; do
 done < <(expand_capabilities "${CAPABILITIES[@]}")
 
 log_info "platform=$PLATFORM doc=$(platform_doc) tools_root=$TOOLS_ROOT"
+
+if ! ensure_python_interpreter; then
+  log_err "Python 3 is required to read bootstrap-manifest.json; no capability was executed."
+  exit 1
+fi
 
 for cap in "${EXPANDED[@]}"; do
   log_info "ensure $cap"
