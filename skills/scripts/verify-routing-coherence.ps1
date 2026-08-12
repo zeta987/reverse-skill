@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 # reverse-skill routing + ops contract gates (skill-router only; no host platform runtime)
 param([string] $ScratchDir = '')
 $ErrorActionPreference = 'Stop'
