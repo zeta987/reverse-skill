@@ -1,7 +1,7 @@
 # RE Agent 工作流门闩（静态↔动态）
 
 > 来源启发：binary-re 阶段划分、社区 RE skill（Frida/r2/Ghidra/IDA 循环）、Cerberus 三头环（静/动/插桩）  
-> Issue #65 增量：IAT 修复铁律、六阶段映射、.NET/DLL·SYS 等价路径；用户指令可行性门闩；旁路补丁 6–10；反调试/混淆菜谱 A–T（2026-08-12）  
+> Issue #65 增量：IAT 修复铁律、六阶段映射、.NET/DLL·SYS 等价路径；用户指令可行性门闩；旁路补丁 6–10；反调试/混淆菜谱 A–T；非 PE 多格式菜谱 U–AV（2026-08-12）  
 > 适用：`reverse-engineering/`、`ida-reverse/`、`radare2/`、`malware-analysis/`、与 cre 角色交接
 
 ## 0. 启动
@@ -31,7 +31,8 @@
 
 ```text
 □ 计算样本 Hash（MD5/SHA256）→ 唯一 ID
-□ 识别文件类型：EXE / DLL / SYS / ELF / Mach-O / .NET / 脚本 等
+□ 识别文件类型：EXE / DLL / SYS / ELF / Mach-O / .NET / 脚本(bat/ps1/vba) / JS / APK 等
+□ 非 PE/脚本/APK/驱动专项：见 §3.4 与 `references/nonpe-format-cookbook.md`（U–AV）
 □ file / DIE / 熵 / 壳特征（PEiD / DIE / Exeinfo 等）
 □ 架构：x86 / x64 / ARM；编译语言线索（VC++ / Delphi / .NET / Go / Rust）
 □ 加壳类型线索：UPX / ASPack / VMProtect / Themida / 未知混淆
@@ -173,6 +174,23 @@
 
 **约束**：绕过失败也记 Evidence；禁止把「反调试触发退出」写成「样本无害」。完整 A–T 与 P2（E 编译时间、O 花指令）见 anti-analysis 菜谱节。
 
+### 3.4 非 PE / 多格式旁路（Issue #65 补丁 U–AV · 路由）
+
+完整索引：`reverse-engineering/references/nonpe-format-cookbook.md`。此处只列 **类型 → 入口**；动作细节在 cookbook / 对应 skill。
+
+| 类型 | 跳转 | P0 Evidence 锚点（示例） |
+|------|------|---------------------------|
+| BAT/CMD | cookbook §1 + malware | `E-batch-deobf` |
+| PowerShell | cookbook §2 + malware | `E-ps-decode-layer-N` |
+| VBA 宏 | cookbook §3 + malware | `E-vba-pcode` |
+| JS 强混淆 / JSVMP | **js-reverse** + cookbook §4 | `E-js-vmp` / `E-js-deobf` |
+| SYS 驱动 | kernel-driver-reverse + cookbook §5 | `E-driver-irp-handlers` / `E-driver-ioctl` |
+| DLL 侧重点 | cookbook §6（AM≡A–T **R**） | `E-dll-tls-dllmain` / `E-exports` |
+| Android 格机/隐藏图标 | **apk-reverse** + cookbook §7–8 | `E-android-wiper-*` / `E-android-hidden-icon-*` |
+
+**约束**：不另起「非 PE 六阶段」；与 §3.3 A–T 分工（PE 反调试 vs 多格式）。授权 lab；格机/BYOVD/反射 = 检测取证表述。
+
+
 ## 4. Synthesis（IOC / 攻击链 / 报告）
 
 ```text
@@ -191,7 +209,7 @@
 | 1 初步快速研判 | §0–§1 Triage | Hash、架构、文件类型、查壳；imports/等价锚点；§0.5 指令门闩 |
 | 2 脱壳与 IAT | §1.2 | IAT 铁律；失败/自校验闪退 → Evidence → Dynamic |
 | 3 基础静态锚点 | §2 Static | 高危 API 组合；时间盒 SHOULD |
-| 4 深度交叉验证 | §3 Dynamic | 断点四级火箭；无行为应急；时间盒；§3.3 A–T 旁路速查 |
+| 4 深度交叉验证 | §3 Dynamic | 断点四级火箭；无行为应急；时间盒；§3.3 A–T；§3.4 U–AV 类型路由 |
 | 5 提取 IoC 与攻击链 | §4 Synthesis | IOC + Kill Chain / Path |
 | 6 归档与规则化 | §4 + docs-generator / YARA | 结构化报告；规则可选 |
 
