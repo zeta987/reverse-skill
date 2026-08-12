@@ -1,4 +1,14 @@
 {
+  "bootstrapDependencies": {
+    "pipx": {
+      "package": "pipx==1.16.5",
+      "version": "1.16.5"
+    },
+    "pnpm": {
+      "package": "pnpm@10.24.0",
+      "version": "10.24.0"
+    }
+  },
   "capabilities": [
     {
       "name": "jadx",

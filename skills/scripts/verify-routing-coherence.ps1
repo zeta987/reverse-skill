@@ -395,6 +395,17 @@ foreach ($mf in @($skillsManifest, $kaliManifest)) {
     if (-not (Test-Path -LiteralPath $mf)) { continue }
     $mn = Split-Path $mf -Leaf
     $mc = Get-Content -LiteralPath $mf -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($dependencyProperty in @($mc.bootstrapDependencies.PSObject.Properties)) {
+        $dependency = $dependencyProperty.Value
+        $expectedSuffix = '(?:==|@)' + [regex]::Escape([string]$dependency.version) + '$'
+        if ([string]::IsNullOrWhiteSpace([string]$dependency.package) -or
+            [string]::IsNullOrWhiteSpace([string]$dependency.version) -or
+            [string]$dependency.package -notmatch $expectedSuffix) {
+            Bad "unpinned bootstrap dependency: $($dependencyProperty.Name) in $mn"
+        } else {
+            Ok "pinned bootstrap dependency $($dependencyProperty.Name) in $mn"
+        }
+    }
     foreach ($cap in $mc.capabilities) {
         if (-not $cap.canAutoInstall) { continue }
         $hasPin = ($cap.pinnedVersion -or $cap.pinnedCommit -or $cap.pinPolicy)

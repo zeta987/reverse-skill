@@ -89,6 +89,19 @@ raise SystemExit(1)
 PY
 }
 
+manifest_dependency() {
+  local name="$1"
+  local field="$2"
+  python3 - "$MANIFEST_PATH" "$name" "$field" <<'PY'
+import json, pathlib, sys
+manifest = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+value = manifest.get('bootstrapDependencies', {}).get(sys.argv[2], {}).get(sys.argv[3])
+if value is None or value == '':
+    raise SystemExit(1)
+print(value)
+PY
+}
+
 safe_remove_install_dir() {
   local target="$1"
   local tmp_target="${2:-}"
@@ -218,15 +231,15 @@ ensure_python_runtime() {
       *) log_err "Install Python 3 manually. See $(platform_doc)"; return 1 ;;
     esac
   fi
-  if ! has_cmd pipx; then
-    case "$PLATFORM" in
-      macos)
-        python3 -m pip install --user pipx || install_brew pipx
-        ;;
-      linux)
-        install_apt pipx || python3 -m pip install --user pipx
-        ;;
-    esac
+  local pipx_package pipx_version current_version
+  pipx_package=$(manifest_dependency pipx package) || return 1
+  pipx_version=$(manifest_dependency pipx version) || return 1
+  current_version=""
+  if has_cmd pipx; then
+    current_version=$(pipx --version 2>/dev/null | head -n1 | tr -d '[:space:]')
+  fi
+  if [[ "$current_version" != "$pipx_version" ]]; then
+    python3 -m pip install --user --upgrade "$pipx_package" || return 1
   fi
   python3 -m pipx ensurepath >/dev/null 2>&1 || true
   export PATH="$HOME/.local/bin:$PATH"
@@ -251,10 +264,17 @@ ensure_java_runtime() {
 }
 
 ensure_pnpm() {
-  ensure_node_runtime
-  if has_cmd pnpm; then return 0; fi
-  if has_cmd corepack; then corepack enable || true; fi
-  if ! has_cmd pnpm; then npm install -g pnpm; fi
+  ensure_node_runtime || return 1
+  local package version current_version
+  package=$(manifest_dependency pnpm package) || return 1
+  version=$(manifest_dependency pnpm version) || return 1
+  current_version=""
+  if has_cmd pnpm; then
+    current_version=$(pnpm --version 2>/dev/null | head -n1 | tr -d '[:space:]')
+  fi
+  if [[ "$current_version" != "$version" ]]; then
+    npm install -g "$package" || return 1
+  fi
 }
 
 # Args: repo regex [release_tag]
@@ -378,14 +398,40 @@ install_git_commit() {
   local commit="$2"
   local install_dir="$3"
 
+  git_checkout_is_clean() {
+    local checkout="$1"
+    local status
+    if ! status=$(git -C "$checkout" status --porcelain --untracked-files=all); then
+      log_err "Cannot inspect checkout state: $checkout"
+      return 1
+    fi
+    if [[ -n "$status" ]]; then
+      log_err "Existing checkout has local changes; refusing to execute it: $checkout"
+      return 1
+    fi
+  }
+
+  cleanup_git_stage() {
+    local stage="$1"
+    local parent="$2"
+    case "$stage" in
+      "$parent"/.reverse-bootstrap-*) rm -rf "$stage" ;;
+      *) log_err "Refusing to clean unexpected staging path: $stage" ;;
+    esac
+  }
+
   if [[ -d "$install_dir/.git" ]]; then
     local current
-    current=$(git -C "$install_dir" rev-parse HEAD 2>/dev/null || true)
+    if ! current=$(git -C "$install_dir" rev-parse HEAD 2>/dev/null); then
+      log_err "Cannot resolve existing checkout HEAD: $install_dir"
+      return 1
+    fi
     if [[ "$current" != "$commit" ]]; then
       log_err "Existing checkout is not at pinned commit $commit: $install_dir"
       log_err "Move it aside explicitly, then retry; bootstrap will not overwrite local changes."
       return 1
     fi
+    git_checkout_is_clean "$install_dir" || return 1
     return 0
   fi
   if [[ -e "$install_dir" ]]; then
@@ -393,15 +439,36 @@ install_git_commit() {
     return 1
   fi
 
-  ensure_dir "$(dirname "$install_dir")"
-  git init --quiet "$install_dir"
-  git -C "$install_dir" remote add origin "$repo"
-  git -C "$install_dir" fetch --depth 1 origin "$commit"
-  git -C "$install_dir" checkout --quiet --detach FETCH_HEAD
-  local resolved
-  resolved=$(git -C "$install_dir" rev-parse HEAD)
+  local parent stage resolved
+  parent=$(dirname "$install_dir")
+  ensure_dir "$parent"
+  stage=$(mktemp -d "$parent/.reverse-bootstrap-XXXXXX") || return 1
+  if ! git init --quiet "$stage" ||
+     ! git -C "$stage" remote add origin "$repo" ||
+     ! git -C "$stage" fetch --depth 1 origin "$commit" ||
+     ! git -C "$stage" checkout --quiet --detach FETCH_HEAD; then
+    cleanup_git_stage "$stage" "$parent"
+    return 1
+  fi
+  if ! resolved=$(git -C "$stage" rev-parse HEAD); then
+    cleanup_git_stage "$stage" "$parent"
+    return 1
+  fi
   if [[ "$resolved" != "$commit" ]]; then
     log_err "Pinned checkout verification failed for $repo: expected $commit, got $resolved"
+    cleanup_git_stage "$stage" "$parent"
+    return 1
+  fi
+  if ! git_checkout_is_clean "$stage"; then
+    cleanup_git_stage "$stage" "$parent"
+    return 1
+  fi
+  if ! python3 - "$stage" "$install_dir" <<'PY'
+import os, sys
+os.rename(sys.argv[1], sys.argv[2])
+PY
+  then
+    cleanup_git_stage "$stage" "$parent"
     return 1
   fi
 }
@@ -539,7 +606,7 @@ ensure_apktool() {
 }
 
 ensure_frida_tools() {
-  ensure_python_runtime
+  ensure_python_runtime || return 1
   if has_cmd frida && has_cmd frida-ps; then log_ok "frida-tools ready"; return 0; fi
   local package
   package=$(manifest_field frida pipPackage)
@@ -548,7 +615,7 @@ ensure_frida_tools() {
 }
 
 ensure_idalib_mcp() {
-  ensure_python_runtime
+  ensure_python_runtime || return 1
   if has_cmd ida-pro-mcp; then log_ok "ida-pro-mcp ready: $(cmd_path ida-pro-mcp)"; return 0; fi
   local source
   source=$(manifest_field idalib-mcp pipSource)
@@ -558,7 +625,7 @@ ensure_idalib_mcp() {
 }
 
 ensure_jshookmcp() {
-  ensure_node_runtime
+  ensure_node_runtime || return 1
   local package
   package=$(manifest_field jshookmcp npmPackage)
   write_mcp_server "jshook" "$(python3 - "$package" <<'PY'
@@ -569,7 +636,7 @@ PY
 }
 
 ensure_reqable_mcp() {
-  ensure_node_runtime
+  ensure_node_runtime || return 1
   local package
   package=$(manifest_field reqable-mcp npmPackage)
   write_mcp_server "reqable-mcp" "$(python3 - "$package" <<'PY'
@@ -589,11 +656,13 @@ ensure_anything_analyzer() {
     case "$PLATFORM" in macos) install_brew git ;; linux) install_apt git ;; esac
   fi
   install_git_commit "$repo" "$commit" "$dir" || return 1
-  ensure_node_runtime
-  ensure_pnpm
+  ensure_node_runtime || return 1
+  ensure_pnpm || return 1
   write_mcp_server "anything-analyzer" '{"url":"http://localhost:23816/mcp"}'
   if $START_SERVICES; then
-    (cd "$dir" && pnpm install && nohup pnpm dev >/tmp/anything-analyzer.log 2>&1 &)
+    (cd "$dir" && pnpm install --frozen-lockfile) || return 1
+    install_git_commit "$repo" "$commit" "$dir" || return 1
+    (cd "$dir" && nohup pnpm dev >/tmp/anything-analyzer.log 2>&1 &)
     if wait_for_port 23816 120; then
       if test_mcp_http 23816; then
         log_ok "anything-analyzer MCP server ready on port 23816 (HTTP verified)"
@@ -647,7 +716,7 @@ ensure_adb() {
 }
 
 ensure_agent_browser() {
-  ensure_node_runtime
+  ensure_node_runtime || return 1
   if has_cmd agent-browser; then log_ok "agent-browser ready"; return 0; fi
   local package
   package=$(manifest_field agent-browser npmPackage)
@@ -658,7 +727,7 @@ ensure_agent_browser() {
 }
 
 ensure_ghidra_mcp() {
-  ensure_java_runtime
+  ensure_java_runtime || return 1
   local repo regex
   repo=$(manifest_field ghidra-mcp repo)
   regex=$(manifest_field ghidra-mcp assetRegex)
@@ -689,7 +758,7 @@ ensure_seclists() {
 }
 
 ensure_proxycat() {
-  ensure_python_runtime
+  ensure_python_runtime || return 1
   if has_cmd proxycat; then log_ok "proxycat ready"; return 0; fi
   local repo commit
   repo=$(manifest_field proxycat repo)
@@ -785,7 +854,7 @@ ensure_yara() {
 }
 
 ensure_pwntools() {
-  ensure_python_runtime
+  ensure_python_runtime || return 1
   if python3 -c "import pwn" 2>/dev/null; then log_ok "pwntools ready"; return 0; fi
   local package
   package=$(manifest_field pwntools pipPackage)

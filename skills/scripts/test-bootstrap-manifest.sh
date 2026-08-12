@@ -3,12 +3,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BOOTSTRAP="$SCRIPT_DIR/bootstrap-reverse.sh"
-MANIFEST="$SCRIPT_DIR/bootstrap-manifest.json"
 KALI_BOOTSTRAP="$SCRIPT_DIR/../../kali/scripts/bootstrap-reverse.sh"
+MANIFEST="$SCRIPT_DIR/bootstrap-manifest.json"
 REAL_PYTHON="$(command -v python3)"
 SCRATCH="$(mktemp -d /tmp/reverse-bootstrap-test-XXXXXX)"
 trap 'rm -rf "$SCRATCH"' EXIT
-
 STUB_BIN="$SCRATCH/bin"
 CALL_LOG="$SCRATCH/calls.log"
 mkdir -p "$STUB_BIN" "$SCRATCH/home" "$SCRATCH/tools"
@@ -16,223 +15,152 @@ mkdir -p "$STUB_BIN" "$SCRATCH/home" "$SCRATCH/tools"
 cat > "$STUB_BIN/command-stub" <<'STUB'
 #!/usr/bin/env bash
 name="$(basename "$0")"
-{
-  printf '%s' "$name"
-  for arg in "$@"; do printf '|%s' "$arg"; done
-  printf '\n'
-} >> "$CALL_LOG"
-
-if [[ "${STUB_FAIL_COMMAND:-}" == "$name" ]]; then
-  exit 1
-fi
-
-if [[ "$name" == "git" ]]; then
-  if [[ "${1:-}" == "init" ]]; then
-    target="${!#}"
-    mkdir -p "$target/.git"
-    printf '%s\n' 'unpinned-head' > "$target/.stub-head"
-  elif [[ "${1:-}" == "-C" && "${3:-}" == "fetch" ]]; then
-    printf '%s\n' "${7:-}" > "$2/.stub-fetch"
-  elif [[ "${1:-}" == "-C" && "${3:-}" == "checkout" ]]; then
-    cat "$2/.stub-fetch" > "$2/.stub-head"
-  elif [[ "${1:-}" == "-C" && "${3:-}" == "rev-parse" ]]; then
-    cat "$2/.stub-head"
-  fi
-fi
-exit 0
+{ printf '%s' "$name"; for arg in "$@"; do printf '|%s' "$arg"; done; printf '\n'; } >> "$CALL_LOG"
+case "$name:${1:-}" in
+  pipx:--version) printf '%s\n' "${STUB_PIPX_VERSION:-0}" ;;
+  pnpm:--version) printf '%s\n' "${STUB_PNPM_VERSION:-0}" ;;
+  git:init)
+    target="${!#}"; mkdir -p "$target/.git"; printf '%s\n' unpinned-head > "$target/.stub-head"
+    ;;
+  git:-C)
+    case "${3:-}" in
+      fetch)
+        [[ "${STUB_FAIL_FETCH:-0}" != 1 ]] || exit 1
+        printf '%s\n' "${7:-}" > "$2/.stub-fetch"
+        ;;
+      checkout) cp "$2/.stub-fetch" "$2/.stub-head" ;;
+      rev-parse) cat "$2/.stub-head" ;;
+      status) [[ ! -e "$2/.stub-dirty" ]] || printf '%s\n' '?? .npmrc' ;;
+    esac
+    ;;
+  nc:-z)
+    count=0; [[ ! -f "$STUB_NC_STATE" ]] || count="$(cat "$STUB_NC_STATE")"
+    printf '%s\n' "$((count + 1))" > "$STUB_NC_STATE"
+    (( count > 0 )) && exit 0 || exit 1
+    ;;
+esac
+[[ "${STUB_FAIL_COMMAND:-}" != "$name" ]]
 STUB
 chmod +x "$STUB_BIN/command-stub"
-for command_name in git node npm npx pipx pnpm sleep; do
-  ln -s command-stub "$STUB_BIN/$command_name"
-done
+for name in git node npm npx pipx pnpm sleep nc; do ln -s command-stub "$STUB_BIN/$name"; done
 
 cat > "$STUB_BIN/python3" <<STUB
 #!/usr/bin/env bash
-if [[ "\${1:-}" == "-" && "\${2:-}" == "23816" ]]; then
-  exit 0
-fi
-if [[ "\${1:-}" == "-c" && "\${2:-}" == "import pwn" ]]; then
-  exit 1
-fi
+{ printf 'python3'; for arg in "\$@"; do printf '|%s' "\$arg"; done; printf '\n'; } >> "\$CALL_LOG"
+if [[ "\${1:-}" == '-m' && "\${2:-}" == pip ]]; then [[ "\${STUB_FAIL_PIP_INSTALL:-0}" != 1 ]]; exit; fi
+if [[ "\${1:-}" == '-m' && "\${2:-}" == pipx ]]; then exit 0; fi
+if [[ "\${1:-}" == '-c' && "\${2:-}" == 'import pwn' ]]; then exit 1; fi
+if [[ "\${1:-}" == '-' && "\${2:-}" == 23816 ]]; then exit 0; fi
 exec "$REAL_PYTHON" "\$@"
 STUB
 chmod +x "$STUB_BIN/python3"
 
-manifest_value() {
+json_value() {
   "$REAL_PYTHON" - "$MANIFEST" "$1" "$2" <<'PY'
 import json, pathlib, sys
-manifest = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
-capability = next(item for item in manifest['capabilities'] if item['name'] == sys.argv[2])
-value = capability.get(sys.argv[3], '')
-print(value if isinstance(value, str) else json.dumps(value, separators=(',', ':')))
+d=json.loads(pathlib.Path(sys.argv[1]).read_text())
+if sys.argv[2] == 'dependency': v=d['bootstrapDependencies'][sys.argv[3]]['package']
+else: v=next(x for x in d['capabilities'] if x['name']==sys.argv[2])[sys.argv[3]]
+print(v)
 PY
 }
 
-run_bootstrap() {
-  env \
-    PATH="$STUB_BIN:/usr/bin:/bin" \
-    HOME="$SCRATCH/home" \
-    CALL_LOG="$CALL_LOG" \
-    REVERSE_SKILL_TOOLS_DIR="$SCRATCH/tools" \
-    CLAUDE_MCP_CONFIG="$SCRATCH/home/mcp.json" \
-    bash "$BOOTSTRAP" "$@"
+run_generic() {
+  env PATH="$STUB_BIN:/usr/bin:/bin" HOME="$SCRATCH/home" CALL_LOG="$CALL_LOG" \
+    STUB_PIPX_VERSION="${STUB_PIPX_VERSION:-}" STUB_PNPM_VERSION="${STUB_PNPM_VERSION:-}" \
+    STUB_FAIL_PIP_INSTALL="${STUB_FAIL_PIP_INSTALL:-0}" STUB_FAIL_FETCH="${STUB_FAIL_FETCH:-0}" \
+    REVERSE_SKILL_TOOLS_DIR="${TEST_TOOLS_ROOT:-$SCRATCH/tools}" \
+    CLAUDE_MCP_CONFIG="$SCRATCH/home/mcp.json" bash "$BOOTSTRAP" "$@"
+}
+run_kali() {
+  rm -f "$SCRATCH/nc-count"
+  env PATH="$STUB_BIN:/opt/homebrew/bin:/usr/bin:/bin" HOME="$SCRATCH/home" \
+    CALL_LOG="$CALL_LOG" STUB_NC_STATE="$SCRATCH/nc-count" STUB_PNPM_VERSION="${STUB_PNPM_VERSION:-}" \
+    STUB_FAIL_FETCH="${STUB_FAIL_FETCH:-0}" bash "$KALI_BOOTSTRAP" "$@"
+}
+expect_line() { grep -Fqx "$1" "$CALL_LOG" || { echo "missing argv: $1" >&2; cat "$CALL_LOG" >&2; return 1; }; }
+expect_fragment() { grep -Fq "$1" "$CALL_LOG" || { echo "missing argv fragment: $1" >&2; cat "$CALL_LOG" >&2; return 1; }; }
+rejects_without_pnpm() {
+  local runner="$1"; shift
+  : > "$CALL_LOG"; set +e; "$runner" "$@" >/dev/null 2>&1; local rc=$?; set -e
+  [[ $rc -ne 0 ]] && ! grep -Eq '^pnpm\|(install|dev)' "$CALL_LOG"
 }
 
-run_bootstrap_with_failing_pipx() {
-  env \
-    PATH="$STUB_BIN:/usr/bin:/bin" \
-    HOME="$SCRATCH/home" \
-    CALL_LOG="$CALL_LOG" \
-    STUB_FAIL_COMMAND=pipx \
-    REVERSE_SKILL_TOOLS_DIR="$SCRATCH/tools" \
-    CLAUDE_MCP_CONFIG="$SCRATCH/home/mcp.json" \
-    bash "$BOOTSTRAP" "$@"
-}
+pipx_package=$(json_value dependency pipx)
+pnpm_package=$(json_value dependency pnpm)
+anything_repo=$(json_value anything-analyzer repoUrl)
+anything_pin=$(json_value anything-analyzer pinnedCommit)
 
-run_kali_bootstrap() {
-  env \
-    PATH="$STUB_BIN:/opt/homebrew/bin:/usr/bin:/bin" \
-    HOME="$SCRATCH/home" \
-    CALL_LOG="$CALL_LOG" \
-    bash "$KALI_BOOTSTRAP" "$@"
-}
-
-failures=0
-check_log_line() {
-  if ! grep -Fqx "$1" "$CALL_LOG"; then
-    printf 'missing argv: %s\n' "$1" >&2
-    failures=$((failures + 1))
-  fi
-}
-
-: > "$CALL_LOG"
-run_bootstrap frida --skip-refresh >/dev/null
-frida_package="$(manifest_value frida pipPackage)"
-check_log_line "pipx|install|--force|$frida_package"
-
-: > "$CALL_LOG"
-run_bootstrap idalib-mcp --skip-refresh >/dev/null
-idalib_source="$(manifest_value idalib-mcp pipSource)"
-check_log_line "pipx|install|--force|$idalib_source"
-
-: > "$CALL_LOG"
-set +e
-run_bootstrap_with_failing_pipx idalib-mcp --skip-refresh >/dev/null 2>&1
-idalib_fail_exit=$?
-set -e
-if [[ "$idalib_fail_exit" -eq 0 ]]; then
-  printf 'idalib-mcp reported success after its pinned install failed\n' >&2
-  failures=$((failures + 1))
-fi
-check_log_line "pipx|install|--force|$idalib_source"
-if [[ "$(wc -l < "$CALL_LOG" | tr -d ' ')" -ne 1 ]]; then
-  printf 'idalib-mcp attempted an unpinned fallback after pinned install failure\n' >&2
-  failures=$((failures + 1))
-fi
-
-: > "$CALL_LOG"
-run_bootstrap agent-browser --skip-refresh >/dev/null
-agent_package="$(manifest_value agent-browser npmPackage)"
-check_log_line "npm|install|-g|$agent_package"
-
-: > "$CALL_LOG"
-run_bootstrap seclists --skip-refresh >/dev/null
-seclists_repo="$(manifest_value seclists repo)"
-seclists_pin="$(manifest_value seclists pinnedCommit)"
-seclists_dir="$SCRATCH/tools/SecLists"
-check_log_line "git|-C|$seclists_dir|remote|add|origin|$seclists_repo"
-check_log_line "git|-C|$seclists_dir|fetch|--depth|1|origin|$seclists_pin"
-
-: > "$CALL_LOG"
-run_bootstrap proxycat --skip-refresh >/dev/null
-proxycat_repo="$(manifest_value proxycat repo)"
-proxycat_pin="$(manifest_value proxycat pinnedCommit)"
-check_log_line "pipx|install|git+${proxycat_repo}@${proxycat_pin}"
-
-: > "$CALL_LOG"
-run_bootstrap pwntools --skip-refresh >/dev/null
-pwntools_package="$(manifest_value pwntools pipPackage)"
-check_log_line "pipx|install|$pwntools_package"
-
-: > "$CALL_LOG"
-run_bootstrap anything-analyzer --start-services --skip-refresh >/dev/null
-anything_repo="$(manifest_value anything-analyzer repoUrl)"
-anything_pin="$(manifest_value anything-analyzer pinnedCommit)"
-anything_dir="$SCRATCH/tools/anything-analyzer"
-if [[ -z "$anything_pin" ]]; then
-  printf 'anything-analyzer is missing pinnedCommit in bootstrap-manifest.json\n' >&2
-  failures=$((failures + 1))
-else
-  check_log_line "git|init|--quiet|$anything_dir"
-  check_log_line "git|-C|$anything_dir|remote|add|origin|$anything_repo"
-  check_log_line "git|-C|$anything_dir|fetch|--depth|1|origin|$anything_pin"
-  check_log_line "git|-C|$anything_dir|checkout|--quiet|--detach|FETCH_HEAD"
-  check_log_line "git|-C|$anything_dir|rev-parse|HEAD"
-fi
-check_log_line 'pnpm|install'
-check_log_line 'pnpm|dev'
-
-if [[ -n "$anything_pin" ]]; then
-  checkout_line="$(grep -nF "git|-C|$anything_dir|checkout|--quiet|--detach|FETCH_HEAD" "$CALL_LOG" | cut -d: -f1 | head -n1)"
-  install_line="$(grep -nF 'pnpm|install' "$CALL_LOG" | cut -d: -f1 | head -n1)"
-  if [[ -z "$checkout_line" || -z "$install_line" || "$checkout_line" -ge "$install_line" ]]; then
-    printf 'anything-analyzer dependencies ran before the pinned checkout\n' >&2
-    failures=$((failures + 1))
-  fi
-fi
-
-: > "$CALL_LOG"
-mkdir -p "$anything_dir/.git"
-printf '%s\n' 'different-commit' > "$anything_dir/.stub-head"
-set +e
-run_bootstrap anything-analyzer --start-services --skip-refresh >/dev/null 2>&1
-mismatch_exit=$?
-set -e
-if [[ "$mismatch_exit" -eq 0 ]]; then
-  printf 'anything-analyzer accepted an existing checkout at a different commit\n' >&2
-  failures=$((failures + 1))
-fi
-if grep -Eq '^pnpm\|(install|dev)$' "$CALL_LOG"; then
-  printf 'anything-analyzer ran dependencies from an unpinned existing checkout\n' >&2
-  failures=$((failures + 1))
-fi
-
-if (( BASH_VERSINFO[0] >= 4 )); then
+# Table: each generic package-manager sink receives its canonical manifest value.
+while IFS='|' read -r capability field expected; do
   : > "$CALL_LOG"
+  STUB_PIPX_VERSION=1.16.5 run_generic "$capability" --skip-refresh >/dev/null
+  expect_line "$expected"
+done <<EOF
+frida|pipPackage|pipx|install|--force|$(json_value frida pipPackage)
+idalib-mcp|pipSource|pipx|install|--force|$(json_value idalib-mcp pipSource)
+agent-browser|npmPackage|npm|install|-g|$(json_value agent-browser npmPackage)
+proxycat|repo|pipx|install|git+$(json_value proxycat repo)@$(json_value proxycat pinnedCommit)
+pwntools|pipPackage|pipx|install|$(json_value pwntools pipPackage)
+EOF
+
+# pipx itself is pinned; a failed pinned install has no mutable fallback.
+: > "$CALL_LOG"
+STUB_FAIL_PIP_INSTALL=1 run_generic frida --skip-refresh >/dev/null 2>&1 && exit 1 || true
+expect_line "python3|-m|pip|install|--user|--upgrade|$pipx_package"
+[[ $(grep -c '|pip|install|' "$CALL_LOG") -eq 1 ]]
+! grep -Eq '^pipx\|(install|upgrade)' "$CALL_LOG"
+
+# Generic Anything Analyzer: staged checkout, pinned pnpm, frozen install, clean recheck, then dev.
+: > "$CALL_LOG"
+STUB_PIPX_VERSION=1.16.5 STUB_PNPM_VERSION=0 run_generic anything-analyzer --start-services --skip-refresh >/dev/null
+anything_dir="$SCRATCH/tools/anything-analyzer"
+expect_line "npm|install|-g|$pnpm_package"
+expect_line 'pnpm|install|--frozen-lockfile'
+expect_line 'pnpm|dev'
+expect_fragment "remote|add|origin|$anything_repo"
+expect_fragment "fetch|--depth|1|origin|$anything_pin"
+[[ -d "$anything_dir/.git" ]]
+[[ $(grep -c '|status|--porcelain|--untracked-files=all' "$CALL_LOG") -ge 2 ]]
+
+# Dirty sources never reach install/dev.
+touch "$anything_dir/.stub-dirty"
+rejects_without_pnpm run_generic anything-analyzer --start-services --skip-refresh
+rm "$anything_dir/.stub-dirty"
+
+# Failed fetch leaves no final checkout or staging poison; a retry can succeed.
+retry_root="$SCRATCH/retry-tools"
+TEST_TOOLS_ROOT="$retry_root" STUB_FAIL_FETCH=1 rejects_without_pnpm run_generic anything-analyzer --start-services --skip-refresh
+[[ ! -e "$retry_root/anything-analyzer" ]]
+[[ -z "$(find "$retry_root" -maxdepth 1 -name '.reverse-bootstrap-*' -print -quit)" ]]
+: > "$CALL_LOG"
+TEST_TOOLS_ROOT="$retry_root" STUB_PNPM_VERSION=10.24.0 run_generic anything-analyzer --start-services --skip-refresh >/dev/null
+[[ -d "$retry_root/anything-analyzer/.git" ]]
+
+# Kali exercises the same source-before-execution boundary where associative arrays are supported.
+if (( BASH_VERSINFO[0] >= 4 )); then
   kali_dir="$SCRATCH/home/tools/anything-analyzer"
   rm -rf "$kali_dir"
-  set +e
-  run_kali_bootstrap anything-analyzer --start-services --skip-refresh >"$SCRATCH/kali-bootstrap.out" 2>&1
-  set -e
-  check_log_line "git|init|-q|$kali_dir"
-  check_log_line "git|-C|$kali_dir|remote|add|origin|$anything_repo"
-  check_log_line "git|-C|$kali_dir|fetch|--depth|1|origin|$anything_pin"
-  check_log_line "git|-C|$kali_dir|checkout|-q|--detach|FETCH_HEAD"
-  check_log_line 'pnpm|install'
-  check_log_line 'pnpm|dev'
-
   : > "$CALL_LOG"
-  mkdir -p "$kali_dir/.git"
-  printf '%s\n' 'different-commit' > "$kali_dir/.stub-head"
   set +e
-  run_kali_bootstrap anything-analyzer --start-services --skip-refresh >/dev/null 2>&1
-  kali_mismatch_exit=$?
+  STUB_PNPM_VERSION=0 run_kali anything-analyzer --start-services --skip-refresh >/dev/null 2>&1
   set -e
-  if [[ "$kali_mismatch_exit" -eq 0 ]]; then
-    printf 'Kali anything-analyzer accepted an existing checkout at a different commit\n' >&2
-    failures=$((failures + 1))
-  fi
-  if grep -Eq '^pnpm\|(install|dev)$' "$CALL_LOG"; then
-    printf 'Kali anything-analyzer ran dependencies from an unpinned existing checkout\n' >&2
-    failures=$((failures + 1))
-  fi
+  expect_line "npm|install|-g|$pnpm_package"
+  expect_line 'pnpm|install|--frozen-lockfile'
+  [[ $(grep -c '|status|--porcelain|--untracked-files=all' "$CALL_LOG") -ge 2 ]]
+  touch "$kali_dir/.stub-dirty"
+  rejects_without_pnpm run_kali anything-analyzer --start-services --skip-refresh
+
+  rm -rf "$kali_dir"
+  : > "$CALL_LOG"
+  STUB_FAIL_FETCH=1 rejects_without_pnpm run_kali anything-analyzer --start-services --skip-refresh
+  [[ ! -e "$kali_dir" ]]
+  [[ -z "$(find "${kali_dir%/*}" -maxdepth 1 -name '.reverse-bootstrap-*' -print -quit)" ]]
+  set +e
+  STUB_PNPM_VERSION=10.24.0 run_kali anything-analyzer --start-services --skip-refresh >/dev/null 2>&1
+  set -e
+  [[ -d "$kali_dir/.git" ]]
+  expect_line 'pnpm|install|--frozen-lockfile'
 fi
 
-if [[ "$failures" -ne 0 ]]; then
-  if [[ -f "$SCRATCH/kali-bootstrap.out" ]]; then cat "$SCRATCH/kali-bootstrap.out" >&2; fi
-  printf '%s\n' 'captured argv:' >&2
-  cat "$CALL_LOG" >&2
-  exit 1
-fi
-
-printf '%s\n' 'bootstrap manifest source regression passed'
+echo 'bootstrap manifest source regression passed'

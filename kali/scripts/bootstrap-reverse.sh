@@ -132,11 +132,22 @@ install_git_commit() {
     local install_dir="$3"
 
     if [[ -d "$install_dir/.git" ]]; then
-        local current
-        current=$(git -C "$install_dir" rev-parse HEAD 2>/dev/null || true)
+        local current status
+        if ! current=$(git -C "$install_dir" rev-parse HEAD 2>/dev/null); then
+            log_err "无法解析现有 checkout HEAD: $install_dir"
+            return 1
+        fi
         if [[ "$current" != "$commit" ]]; then
             log_err "Existing checkout is not at pinned commit $commit: $install_dir"
             log_err "Move it aside explicitly, then retry; bootstrap will not overwrite local changes."
+            return 1
+        fi
+        if ! status=$(git -C "$install_dir" status --porcelain --untracked-files=all); then
+            log_err "无法检查 checkout 状态: $install_dir"
+            return 1
+        fi
+        if [[ -n "$status" ]]; then
+            log_err "现有 checkout 含本地修改，拒绝执行: $install_dir"
             return 1
         fi
         return 0
@@ -146,15 +157,33 @@ install_git_commit() {
         return 1
     fi
 
-    mkdir -p "$(dirname "$install_dir")"
-    git init -q "$install_dir"
-    git -C "$install_dir" remote add origin "$repo"
-    git -C "$install_dir" fetch --depth 1 origin "$commit"
-    git -C "$install_dir" checkout -q --detach FETCH_HEAD
-    local resolved
-    resolved=$(git -C "$install_dir" rev-parse HEAD)
+    local parent stage resolved status
+    parent=$(dirname "$install_dir")
+    mkdir -p "$parent"
+    stage=$(mktemp -d "$parent/.reverse-bootstrap-XXXXXX") || return 1
+    if ! git init -q "$stage" ||
+       ! git -C "$stage" remote add origin "$repo" ||
+       ! git -C "$stage" fetch --depth 1 origin "$commit" ||
+       ! git -C "$stage" checkout -q --detach FETCH_HEAD; then
+        rm -rf "$stage"
+        return 1
+    fi
+    if ! resolved=$(git -C "$stage" rev-parse HEAD); then
+        rm -rf "$stage"
+        return 1
+    fi
     if [[ "$resolved" != "$commit" ]]; then
         log_err "Pinned checkout verification failed (expected $commit, got $resolved)"
+        rm -rf "$stage"
+        return 1
+    fi
+    if ! status=$(git -C "$stage" status --porcelain --untracked-files=all) || [[ -n "$status" ]]; then
+        log_err "Staged checkout is not clean: $stage"
+        rm -rf "$stage"
+        return 1
+    fi
+    if ! mv -T "$stage" "$install_dir"; then
+        rm -rf "$stage"
         return 1
     fi
 }
@@ -329,6 +358,13 @@ manifest_field() {
     fi
     jq -er --arg name "$capability" --arg field "$field" \
         '.capabilities[] | select(.name == $name) | .[$field] // empty' "$KALI_MANIFEST"
+}
+
+manifest_dependency() {
+    local name="$1"
+    local field="$2"
+    jq -er --arg name "$name" --arg field "$field" \
+        '.bootstrapDependencies[$name][$field] // empty' "$KALI_MANIFEST"
 }
 
 install_manifest_release() {
@@ -636,11 +672,19 @@ start_anything_analyzer() {
     commit=$(manifest_field anything-analyzer pinnedCommit)
     install_git_commit "$repo" "$commit" "$repo_dir" || return 1
 
-    if ! command -v pnpm &>/dev/null; then
-        npm install -g pnpm
+    local pnpm_package pnpm_version current_pnpm_version=''
+    pnpm_package=$(manifest_dependency pnpm package) || return 1
+    pnpm_version=$(manifest_dependency pnpm version) || return 1
+    if command -v pnpm &>/dev/null; then
+        current_pnpm_version=$(pnpm --version 2>/dev/null | head -n1 | tr -d '[:space:]')
+    fi
+    if [[ "$current_pnpm_version" != "$pnpm_version" ]]; then
+        npm install -g "$pnpm_package" || return 1
     fi
 
-    (cd "$repo_dir" && pnpm install && nohup pnpm dev > /tmp/anything-analyzer.log 2>&1 &)
+    (cd "$repo_dir" && pnpm install --frozen-lockfile) || return 1
+    install_git_commit "$repo" "$commit" "$repo_dir" || return 1
+    (cd "$repo_dir" && nohup pnpm dev > /tmp/anything-analyzer.log 2>&1 &)
 
     log_info "等待 anything-analyzer 启动 (port 23816) ..."
     if wait_for_port 23816 120; then
