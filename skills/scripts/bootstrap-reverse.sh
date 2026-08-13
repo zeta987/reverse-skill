@@ -679,7 +679,14 @@ ensure_anything_analyzer() {
   if $START_SERVICES; then
     (cd "$dir" && pnpm install --frozen-lockfile) || return 1
     install_git_commit "$repo" "$commit" "$dir" || return 1
-    (cd "$dir" && nohup pnpm dev >/tmp/anything-analyzer.log 2>&1 &)
+    (
+      cd "$dir" || exit 1
+      if has_cmd nohup; then
+        nohup pnpm dev >/tmp/anything-analyzer.log 2>&1 &
+      else
+        pnpm dev >/tmp/anything-analyzer.log 2>&1 &
+      fi
+    )
     if wait_for_port 23816 120; then
       if test_mcp_http 23816; then
         log_ok "anything-analyzer MCP server ready on port 23816 (HTTP verified)"

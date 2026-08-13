@@ -16,7 +16,7 @@ cat > "$STUB_BIN/command-stub" <<'STUB'
 #!/usr/bin/env bash
 name="$(basename "$0")"
 { printf '%s' "$name"; for arg in "$@"; do printf '|%s' "$arg"; done; printf '\n'; } >> "$CALL_LOG"
-if [[ "$name" == sudo ]]; then
+if [[ "$name" == sudo || "$name" == nohup ]]; then
   next="${1:-}"; shift || true
   exec "$(dirname "$0")/$next" "$@"
 fi
@@ -57,7 +57,7 @@ esac
 [[ "${STUB_FAIL_COMMAND:-}" != "$name" ]]
 STUB
 chmod +x "$STUB_BIN/command-stub"
-for name in git node npm npx pipx pnpm sleep nc apt-get sudo; do ln -s command-stub "$STUB_BIN/$name"; done
+for name in git node npm npx pipx pnpm sleep nc apt-get sudo nohup; do ln -s command-stub "$STUB_BIN/$name"; done
 ln -s command-stub "$STUB_BIN/brew"
 
 cat > "$STUB_BIN/python3" <<STUB
@@ -112,7 +112,7 @@ anything_pin=$(json_value anything-analyzer pinnedCommit)
 NO_PYTHON_BIN="$SCRATCH/no-python-bin"
 PARSER_FIXTURE="$SCRATCH/parser-bootstrap"
 mkdir -p "$NO_PYTHON_BIN"
-for name in git node npm npx pipx pnpm sleep nc brew apt-get sudo; do ln -s "$STUB_BIN/command-stub" "$NO_PYTHON_BIN/$name"; done
+for name in git node npm npx pipx pnpm sleep nc brew apt-get sudo nohup; do ln -s "$STUB_BIN/command-stub" "$NO_PYTHON_BIN/$name"; done
 for tool in bash uname dirname mktemp rm head tr basename mkdir cat ln; do ln -s "$(command -v "$tool")" "$NO_PYTHON_BIN/$tool"; done
 mkdir -p "$PARSER_FIXTURE"
 cp "$BOOTSTRAP" "$PARSER_FIXTURE/bootstrap-reverse.sh"
