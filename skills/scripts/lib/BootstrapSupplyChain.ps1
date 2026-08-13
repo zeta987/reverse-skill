@@ -4,8 +4,17 @@ function Ensure-Pnpm {
     $pnpm = Get-NodeCommandPath -Name 'pnpm'
     $currentVersion = ''
     if ($pnpm) {
-        $versionLine = & $pnpm --version 2>$null | Select-Object -First 1
-        if ($LASTEXITCODE -eq 0 -and $null -ne $versionLine) {
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $versionOutput = @(& $pnpm --version 2>$null)
+            $versionExitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+        $versionLine = $versionOutput | Select-Object -First 1
+        if ($versionExitCode -eq 0 -and $null -ne $versionLine) {
             $currentVersion = ([string]$versionLine).Trim()
         }
     }
@@ -28,13 +37,29 @@ function Assert-GitCheckoutState {
         [Parameter(Mandatory = $true)][string]$PinnedCommit
     )
 
-    $resolvedLine = & $GitPath -C $CheckoutPath rev-parse HEAD 2>$null | Select-Object -First 1
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $resolvedOutput = @(& $GitPath -C $CheckoutPath rev-parse HEAD 2>$null)
+        $resolveExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    $resolvedLine = $resolvedOutput | Select-Object -First 1
     $resolvedCommit = if ($null -eq $resolvedLine) { '' } else { ([string]$resolvedLine).Trim() }
-    if ($LASTEXITCODE -ne 0 -or $resolvedCommit -ne $PinnedCommit) {
+    if ($resolveExitCode -ne 0 -or $resolvedCommit -ne $PinnedCommit) {
         throw "Checkout verification failed: expected $PinnedCommit, got $resolvedCommit ($CheckoutPath)"
     }
-    $status = @(& $GitPath -C $CheckoutPath status --porcelain --untracked-files=all 2>&1)
-    if ($LASTEXITCODE -ne 0) {
+    try {
+        $ErrorActionPreference = 'Continue'
+        $status = @(& $GitPath -C $CheckoutPath status --porcelain --untracked-files=all 2>$null)
+        $statusExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($statusExitCode -ne 0) {
         throw "Cannot inspect checkout state: $CheckoutPath"
     }
     if ($status.Count -gt 0) {

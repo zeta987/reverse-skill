@@ -64,7 +64,7 @@ try {
     New-Item -ItemType Directory -Path $bin | Out-Null
     $env:PATH = "$bin$([IO.Path]::PathSeparator)$env:PATH"
     $env:BOOTSTRAP_PS_LOG = Join-Path $scratch 'commands.log'
-    $isWindowsHost = $env:OS -eq 'Windows_NT'
+    $isWindowsHost = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
     $stub = Join-Path $bin ($(if ($isWindowsHost) { 'npm.cmd' } else { 'npm' }))
     if ($isWindowsHost) {
         Set-Content $stub @'
@@ -98,6 +98,10 @@ if "%1"=="--version" (echo 10.24.0) else (echo pnpm^|%*>>"%BOOTSTRAP_PS_LOG%")
 printf "pnpm|%s\n" "$*" >> "$BOOTSTRAP_PS_LOG"
 '@
     }
+    $commandLogBefore = Get-Content -LiteralPath $env:BOOTSTRAP_PS_LOG -Raw
+    Ensure-Pnpm
+    $commandLogAfter = Get-Content -LiteralPath $env:BOOTSTRAP_PS_LOG -Raw
+    Assert-True ($commandLogAfter -eq $commandLogBefore) 'matching pnpm version triggered reinstall'
     function Approve-AnythingAnalyzerBuildScripts { param([string]$RepoDir) Set-Content (Join-Path $RepoDir 'pnpm-workspace.yaml') 'generated'; Set-Content (Join-Path $RepoDir 'package.json') '{"mutated":true}' }
     $dirtyRejected = $false
     try { Invoke-AnythingAnalyzerPinnedInstall -RepoDir $target -PnpmPath $pnpm -GitPath (Get-Command git).Source -PinnedCommit $pin } catch { $dirtyRejected = $_.Exception.Message -match 'local changes' }
