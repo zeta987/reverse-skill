@@ -15,6 +15,16 @@ function Test-AnythingAnalyzerElectronHealthy { return $true }
 
 function Assert-True { param([bool]$Condition, [string]$Message) if (-not $Condition) { throw $Message } }
 function Invoke-Git { param([string[]]$Arguments) & git @Arguments; if ($LASTEXITCODE -ne 0) { throw "git failed: $Arguments" } }
+function Write-UnixExecutable {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Content
+    )
+    $normalized = ($Content -replace "`r`n", "`n") -replace "`r", "`n"
+    if (-not $normalized.EndsWith("`n")) { $normalized += "`n" }
+    [IO.File]::WriteAllText($Path, $normalized, [Text.UTF8Encoding]::new($false))
+    & chmod +x $Path
+}
 
 try {
     $source = Join-Path $scratch 'source'
@@ -63,15 +73,14 @@ echo npm^|%*>>"%BOOTSTRAP_PS_LOG%"
 '@
     }
     else {
-        Set-Content $stub @'
+        Write-UnixExecutable -Path $stub -Content @'
 #!/bin/sh
 printf "npm|%s\n" "$*" >> "$BOOTSTRAP_PS_LOG"
 '@
-        & chmod +x $stub
     }
     $pnpm = Join-Path $bin ($(if ($isWindowsHost) { 'pnpm.cmd' } else { 'pnpm' }))
     if ($isWindowsHost) { Set-Content $pnpm "@echo off`r`necho 0" }
-    else { Set-Content $pnpm "#!/bin/sh`necho 0"; & chmod +x $pnpm }
+    else { Write-UnixExecutable -Path $pnpm -Content "#!/bin/sh`necho 0" }
     Ensure-Pnpm
     Assert-True ((Get-Content $env:BOOTSTRAP_PS_LOG) -match 'npm\|install -g pnpm@10.24.0') 'pnpm install was not pinned'
 
@@ -83,12 +92,11 @@ if "%1"=="--version" (echo 10.24.0) else (echo pnpm^|%*>>"%BOOTSTRAP_PS_LOG%")
 '@
     }
     else {
-        Set-Content $pnpm @'
+        Write-UnixExecutable -Path $pnpm -Content @'
 #!/bin/sh
 [ "$1" = --version ] && { echo 10.24.0; exit; }
 printf "pnpm|%s\n" "$*" >> "$BOOTSTRAP_PS_LOG"
 '@
-        & chmod +x $pnpm
     }
     function Approve-AnythingAnalyzerBuildScripts { param([string]$RepoDir) Set-Content (Join-Path $RepoDir 'pnpm-workspace.yaml') 'generated'; Set-Content (Join-Path $RepoDir 'package.json') '{"mutated":true}' }
     $dirtyRejected = $false
