@@ -16,11 +16,21 @@ cat > "$STUB_BIN/command-stub" <<'STUB'
 #!/usr/bin/env bash
 name="$(basename "$0")"
 { printf '%s' "$name"; for arg in "$@"; do printf '|%s' "$arg"; done; printf '\n'; } >> "$CALL_LOG"
+if [[ "$name" == sudo ]]; then
+  next="${1:-}"; shift || true
+  exec "$(dirname "$0")/$next" "$@"
+fi
 case "$name:${1:-}" in
   pipx:--version) printf '%s\n' "${STUB_PIPX_VERSION:-0}" ;;
   pnpm:--version) printf '%s\n' "${STUB_PNPM_VERSION:-0}" ;;
   brew:install)
     if [[ "${2:-}" == python ]]; then
+      ln -sf "$STUB_PYTHON_SOURCE" "$STUB_ACTIVE_BIN/python3"
+    fi
+    ;;
+  apt-get:install)
+    pkg="${3:-${2:-}}"
+    if [[ "$pkg" == python3 ]]; then
       ln -sf "$STUB_PYTHON_SOURCE" "$STUB_ACTIVE_BIN/python3"
     fi
     ;;
@@ -47,7 +57,7 @@ esac
 [[ "${STUB_FAIL_COMMAND:-}" != "$name" ]]
 STUB
 chmod +x "$STUB_BIN/command-stub"
-for name in git node npm npx pipx pnpm sleep nc; do ln -s command-stub "$STUB_BIN/$name"; done
+for name in git node npm npx pipx pnpm sleep nc apt-get sudo; do ln -s command-stub "$STUB_BIN/$name"; done
 ln -s command-stub "$STUB_BIN/brew"
 
 cat > "$STUB_BIN/python3" <<STUB
@@ -102,17 +112,26 @@ anything_pin=$(json_value anything-analyzer pinnedCommit)
 NO_PYTHON_BIN="$SCRATCH/no-python-bin"
 PARSER_FIXTURE="$SCRATCH/parser-bootstrap"
 mkdir -p "$NO_PYTHON_BIN"
-for name in git node npm npx pipx pnpm sleep nc brew; do ln -s "$STUB_BIN/command-stub" "$NO_PYTHON_BIN/$name"; done
+for name in git node npm npx pipx pnpm sleep nc brew apt-get sudo; do ln -s "$STUB_BIN/command-stub" "$NO_PYTHON_BIN/$name"; done
 for tool in bash uname dirname mktemp rm head tr basename mkdir cat ln; do ln -s "$(command -v "$tool")" "$NO_PYTHON_BIN/$tool"; done
 mkdir -p "$PARSER_FIXTURE"
 cp "$BOOTSTRAP" "$PARSER_FIXTURE/bootstrap-reverse.sh"
 cp "$MANIFEST" "$PARSER_FIXTURE/bootstrap-manifest.json"
 : > "$CALL_LOG"
-env PATH="$NO_PYTHON_BIN" HOME="$SCRATCH/home" CALL_LOG="$CALL_LOG" \
+if ! env PATH="$NO_PYTHON_BIN" HOME="$SCRATCH/home" CALL_LOG="$CALL_LOG" \
   STUB_ACTIVE_BIN="$NO_PYTHON_BIN" STUB_PYTHON_SOURCE="$STUB_BIN/python3" \
   REVERSE_SKILL_TOOLS_DIR="$SCRATCH/tools" CLAUDE_MCP_CONFIG="$SCRATCH/home/mcp.json" \
-  bash "$PARSER_FIXTURE/bootstrap-reverse.sh" agent-browser --skip-refresh >/dev/null
-expect_line 'brew|install|python'
+  bash "$PARSER_FIXTURE/bootstrap-reverse.sh" agent-browser --skip-refresh \
+  >"$SCRATCH/parser-out.log" 2>&1; then
+  echo "parser-bootstrap failed:" >&2
+  cat "$SCRATCH/parser-out.log" >&2
+  exit 1
+fi
+if [[ "$(uname -s)" == Darwin ]]; then
+  expect_line 'brew|install|python'
+else
+  expect_line 'apt-get|install|-y|python3'
+fi
 expect_line "npm|install|-g|$(json_value agent-browser npmPackage)"
 ! grep -Fq '|pip|install|' "$CALL_LOG"
 

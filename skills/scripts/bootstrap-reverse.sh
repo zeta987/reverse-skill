@@ -143,14 +143,13 @@ sudo_cmd() {
 
 is_kali() {
   [[ -f /etc/os-release ]] || return 1
-  local line lowered
+  local line
   while IFS= read -r line || [[ -n "$line" ]]; do
-    lowered="$(printf '%s\n' "$line" | tr '[:upper:]' '[:lower:]')"
-    case "$lowered" in
-      id_like=*) continue ;;
-      id=*)
-        case "$lowered" in
-          *kali*) return 0 ;;
+    case "$line" in
+      ID_LIKE=*|id_like=*) continue ;;
+      ID=*|id=*)
+        case "$line" in
+          *[Kk][Aa][Ll][Ii]*) return 0 ;;
         esac
         ;;
     esac
