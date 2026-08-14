@@ -449,6 +449,23 @@ if ($fail.Count -gt 0) {
     $fail | Set-Content (Join-Path $ScratchDir 'failures.txt') -Encoding UTF8
     exit 1
 }
-Write-Host 'ALL ROUTING COHERENCE CHECKS PASSED' -ForegroundColor Green
+Write-Host '
+# Issue #77 — analysis decision framework anchors
+$adf = Join-Path $PackageRoot "skills\ops\analysis-decision-framework.md"
+Assert-FileExists $adf "analysis-decision-framework.md (issue #77)"
+Assert-FileContains $adf "R4*" "ADF R4* validated sufficiency"
+Assert-FileContains $adf "E-insufficient-evidence" "ADF E-insufficient-evidence"
+Assert-FileContains $adf "E-hypothesis-confirmed" "ADF hypothesis evidence"
+Assert-FileContains $adf "ungrounded" "ADF ungrounded flag"
+Assert-FileContains $adf "Not** a second master" "ADF not second master workflow"
+$efp77 = Join-Path $PackageRoot "skills\ops\evidence-finding-path.md"
+Assert-FileContains $efp77 "analysis-decision-framework" "evidence-finding-path hooks ADF"
+Assert-FileContains $efp77 "E-insufficient-evidence" "evidence-finding-path R4* id"
+$wf77 = Join-Path $PackageRoot "skills\reverse-engineering\references\re-agent-workflow.md"
+Assert-FileContains $wf77 "analysis-decision-framework" "re-agent-workflow hooks ADF"
+$rules77 = Join-Path $PackageRoot "RULES.md"
+Assert-FileContains $rules77 "analysis-decision-framework" "RULES.md hooks ADF"
+
+ALL ROUTING COHERENCE CHECKS PASSED' -ForegroundColor Green
 'ALL ROUTING COHERENCE CHECKS PASSED' | Set-Content (Join-Path $ScratchDir 'verify.txt') -Encoding UTF8
 exit 0

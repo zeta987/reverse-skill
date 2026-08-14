@@ -144,6 +144,8 @@
 
 ## 执行原则
 
+> **决策质量（Issue #77）：** 假设退出、validated 充分性（R4*）、结论锚定与死锁重规划见 skills/ops/analysis-decision-framework.md。**不要**把 R1-R51 全文塞进本文件。
+
 ### 工具使用
 - **永远不要猜工具路径**，先读 `tool-index.md`
 - 缺少工具时先调用平台对应的 bootstrap 脚本自动补齐，不要直接报错：
