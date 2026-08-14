@@ -466,6 +466,20 @@ Assert-FileContains $wf77 "analysis-decision-framework" "re-agent-workflow hooks
 $rules77 = Join-Path $PackageRoot "RULES.md"
 Assert-FileContains $rules77 "analysis-decision-framework" "RULES.md hooks ADF"
 
+
+# Issue 77 batch 2 blindspot cookbook anchors
+$bsc = Join-Path $PackageRoot "skills\ops\analysis-blindspot-cookbook.md"
+Assert-FileExists $bsc "analysis-blindspot-cookbook.md (issue77 R52-R81)"
+Assert-FileContains $bsc "R52" "BSC R52 Rust"
+Assert-FileContains $bsc "E-rust-identified" "BSC E-rust-identified"
+Assert-FileContains $bsc "E-vmp-protected" "BSC E-vmp-protected"
+Assert-FileContains $bsc "E-llm-hallucination" "BSC E-llm-hallucination"
+Assert-FileContains $bsc "E-kernel-protect-tamper" "BSC kernel detect-only id"
+Assert-FileContains $bsc "Not** a third master" "BSC not third master workflow"
+Assert-FileContains $bsc "no bypass tutorial" "BSC no bypass tutorial"
+$adf2 = Join-Path $PackageRoot "skills\ops\analysis-decision-framework.md"
+Assert-FileContains $adf2 "analysis-blindspot-cookbook" "ADF links blindspot cookbook"
+
 ALL ROUTING COHERENCE CHECKS PASSED' -ForegroundColor Green
 'ALL ROUTING COHERENCE CHECKS PASSED' | Set-Content (Join-Path $ScratchDir 'verify.txt') -Encoding UTF8
 exit 0
