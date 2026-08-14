@@ -32,6 +32,15 @@ jobs:
         shell: pwsh
         run: ./skills/scripts/verify-routing-coherence.ps1
 
+      - name: Bootstrap supply-chain regression
+        shell: pwsh
+        run: ./skills/scripts/test-bootstrap-supply-chain.ps1
+
+      - name: Bootstrap supply-chain regression (Windows PowerShell 5.1)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./skills/scripts/test-bootstrap-supply-chain.ps1
+
       - name: Smoke (verify + parse + quick route)
         shell: pwsh
         run: ./skills/scripts/smoke.ps1
@@ -72,6 +81,7 @@ jobs:
         run: |
           set -euo pipefail
           bash skills/scripts/test-routing.sh
+          bash skills/scripts/test-bootstrap-manifest.sh
 
           scratch="$(mktemp -d)"
           trap 'rm -rf "$scratch"' EXIT
