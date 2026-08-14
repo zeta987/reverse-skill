@@ -151,7 +151,12 @@ printf "pnpm|%s\n" "$*" >> "$BOOTSTRAP_PS_LOG"
     }
 
     . (Join-Path $PSScriptRoot 'bootstrap-reverse.ps1') -Capability '__test_missing__' -SkipRefresh | Out-Null
-    $script:gitCloneDefinition = [pscustomobject]@{ name = 'test-git-clone'; bootstrapKind = 'git-clone'; canAutoInstall = $true }
+    $script:gitCloneDefinition = [pscustomobject]@{
+        name = 'test-git-clone'
+        bootstrapKind = 'git-clone'
+        canAutoInstall = $true
+        installDir = (Join-Path $scratch 'test-git-clone')
+    }
     $script:gitCloneVerifierCalled = $false
     function Get-ReverseBootstrapDefinition { param([string]$Name) return $script:gitCloneDefinition }
     function Get-ReverseCapabilityState { param([string]$Name) return [pscustomobject]@{ Ready = $true } }
