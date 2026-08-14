@@ -137,6 +137,7 @@ printf "pnpm|%s\n" "$*" >> "$BOOTSTRAP_PS_LOG"
             $powerShellHost = if ($PSVersionTable.PSEdition -eq 'Desktop') { Join-Path $PSHOME 'powershell.exe' } else { Join-Path $PSHOME 'pwsh' }
             $childOutput = @(& $powerShellHost -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'bootstrap-reverse.ps1') -Capability seclists -SkipRefresh)
             $childExitCode = $LASTEXITCODE
+            $global:LASTEXITCODE = 0
             $childResult = ($childOutput -join [Environment]::NewLine) | ConvertFrom-Json
             Assert-True ($childExitCode -ne 0) 'failed public bootstrap exited successfully'
             Assert-True ($childResult.status -eq 'failed') 'failed public bootstrap did not report failed status'
