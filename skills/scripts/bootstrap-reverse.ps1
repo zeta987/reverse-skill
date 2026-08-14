@@ -752,16 +752,16 @@ function Start-AnythingAnalyzerService {
         $AuthToken = Ensure-AnythingAnalyzerMcpConfig -Port ([int]$Definition.servicePort)
     }
 
-    if (Test-ReverseTcpPort -Port ([int]$Definition.servicePort)) {
-        return
-    }
-
     $repoDir = [string]$Definition.installDir
     $checkoutDefinition = [pscustomobject]@{
         repo         = [string]$Definition.repoUrl
         pinnedCommit = [string]$Definition.pinnedCommit
     }
     Ensure-GitCloneInstall -Definition $checkoutDefinition -TargetPath $repoDir | Out-Null
+
+    if (Test-ReverseTcpPort -Port ([int]$Definition.servicePort)) {
+        return
+    }
 
 Ensure-Pnpm
 $vsBuildToolsError = ''
@@ -842,7 +842,7 @@ function Ensure-Capability {
     }
 
     $existingState = Get-ReverseCapabilityState -Name $Name
-    if ($existingState -and -not $definition.PSObject.Properties['mcpNames']) {
+    if ($existingState -and -not $definition.PSObject.Properties['mcpNames'] -and $definition.bootstrapKind -ne 'git-clone') {
         $toolSpec = $null
         try {
             $toolSpec = Resolve-ReverseToolSpec -Name $Name
@@ -1053,6 +1053,12 @@ function Expand-CapabilityDependencies {
     return $ordered
 }
 
+function Test-BootstrapResultsSucceeded {
+    param([Parameter(Mandatory = $true)][object[]]$Results)
+
+    return (@($Results | Where-Object { $_.status -eq 'failed' }).Count -eq 0)
+}
+
 $expandedCapabilities = Expand-CapabilityDependencies -Names $Capability
 $results = @()
 
@@ -1112,3 +1118,6 @@ if (-not $SkipRefresh) {
 }
 
 $results | ConvertTo-Json -Depth 5
+if (-not (Test-BootstrapResultsSucceeded -Results $results)) {
+    exit 1
+}

@@ -661,16 +661,16 @@ EOF
 # ─── 服务启动 ──────────────────────────────────────────────────────────────────────
 
 start_anything_analyzer() {
-    if test_tcp_port 23816 2>/dev/null; then
-        log_ok "anything-analyzer 已在运行 (port 23816)"
-        return 0
-    fi
-
     local repo_dir="$HOME/tools/anything-analyzer"
     local repo commit
     repo=$(manifest_field anything-analyzer repoUrl)
     commit=$(manifest_field anything-analyzer pinnedCommit)
     install_git_commit "$repo" "$commit" "$repo_dir" || return 1
+
+    if test_tcp_port 23816 2>/dev/null; then
+        log_ok "anything-analyzer 已在运行 (port 23816)"
+        return 0
+    fi
 
     local pnpm_package pnpm_version current_pnpm_version=''
     pnpm_package=$(manifest_dependency pnpm package) || return 1

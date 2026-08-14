@@ -46,7 +46,9 @@ try {
 
     $failedTarget = Join-Path $scratch 'failed'
     $badDefinition = [pscustomobject]@{ repo = (Join-Path $scratch 'missing'); pinnedCommit = $pin }
-    try { Ensure-GitCloneInstall -Definition $badDefinition -TargetPath $failedTarget | Out-Null; throw 'failed fetch accepted' } catch {}
+    $failedFetchRejected = $false
+    try { Ensure-GitCloneInstall -Definition $badDefinition -TargetPath $failedTarget | Out-Null } catch { $failedFetchRejected = $true }
+    Assert-True $failedFetchRejected 'failed fetch accepted'
     Assert-True (-not (Test-Path $failedTarget)) 'failed fetch poisoned final path'
     Assert-True (@(Get-ChildItem $scratch -Filter '.reverse-bootstrap-*').Count -eq 0) 'failed fetch left staging path'
 
@@ -107,6 +109,75 @@ printf "pnpm|%s\n" "$*" >> "$BOOTSTRAP_PS_LOG"
     try { Invoke-AnythingAnalyzerPinnedInstall -RepoDir $target -PnpmPath $pnpm -GitPath (Get-Command git).Source -PinnedCommit $pin } catch { $dirtyRejected = $_.Exception.Message -match 'local changes' }
     Assert-True $dirtyRejected 'post-install dirty checkout accepted or rejection reason changed'
     Assert-True (-not (Test-Path (Join-Path $target 'pnpm-workspace.yaml'))) 'generated workspace file was not removed'
+
+    Invoke-Git -Arguments @('-C', $target, 'config', 'user.email', 'test@example.invalid')
+    Invoke-Git -Arguments @('-C', $target, 'config', 'user.name', 'test')
+    Invoke-Git -Arguments @('-C', $target, 'commit', '--allow-empty', '--quiet', '-m', 'wrong checkout')
+    $wrongCommitRejected = $false
+    try { Ensure-GitCloneInstall -Definition $definition -TargetPath $target | Out-Null } catch { $wrongCommitRejected = $_.Exception.Message -match 'expected' }
+    Assert-True $wrongCommitRejected 'clean wrong-commit checkout accepted'
+
+    $publicProfile = [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
+    $publicTools = Join-Path $publicProfile 'Tools'
+    $publicTarget = Join-Path $publicTools 'SecLists'
+    if (Test-Path -LiteralPath $publicTarget) {
+        Write-Host 'SKIP: public bootstrap exit regression (existing SecLists checkout)'
+    }
+    else {
+        $createdPublicTools = -not (Test-Path -LiteralPath $publicTools)
+        try {
+            New-Item -ItemType Directory -Path $publicTarget -Force | Out-Null
+            Invoke-Git -Arguments @('-C', $publicTarget, 'init', '--quiet')
+            Invoke-Git -Arguments @('-C', $publicTarget, 'config', 'user.email', 'test@example.invalid')
+            Invoke-Git -Arguments @('-C', $publicTarget, 'config', 'user.name', 'test')
+            Set-Content (Join-Path $publicTarget 'fixture.txt') 'wrong checkout'
+            Invoke-Git -Arguments @('-C', $publicTarget, 'add', 'fixture.txt')
+            Invoke-Git -Arguments @('-C', $publicTarget, 'commit', '--quiet', '-m', 'fixture')
+
+            $powerShellHost = if ($PSVersionTable.PSEdition -eq 'Desktop') { Join-Path $PSHOME 'powershell.exe' } else { Join-Path $PSHOME 'pwsh' }
+            $childOutput = @(& $powerShellHost -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'bootstrap-reverse.ps1') -Capability seclists -SkipRefresh)
+            $childExitCode = $LASTEXITCODE
+            $childResult = ($childOutput -join [Environment]::NewLine) | ConvertFrom-Json
+            Assert-True ($childExitCode -ne 0) 'failed public bootstrap exited successfully'
+            Assert-True ($childResult.status -eq 'failed') 'failed public bootstrap did not report failed status'
+            Assert-True ($childResult.error -match 'Checkout verification failed') 'failed public bootstrap did not report checkout verification'
+        }
+        finally {
+            Remove-Item -LiteralPath $publicTarget -Recurse -Force -ErrorAction SilentlyContinue
+            if ($createdPublicTools -and (Test-Path -LiteralPath $publicTools) -and (@(Get-ChildItem -LiteralPath $publicTools -Force).Count -eq 0)) {
+                Remove-Item -LiteralPath $publicTools -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    . (Join-Path $PSScriptRoot 'bootstrap-reverse.ps1') -Capability '__test_missing__' -SkipRefresh | Out-Null
+    $script:gitCloneDefinition = [pscustomobject]@{ name = 'test-git-clone'; bootstrapKind = 'git-clone'; canAutoInstall = $true }
+    $script:gitCloneVerifierCalled = $false
+    function Get-ReverseBootstrapDefinition { param([string]$Name) return $script:gitCloneDefinition }
+    function Get-ReverseCapabilityState { param([string]$Name) return [pscustomobject]@{ Ready = $true } }
+    function Resolve-ReverseToolSpec { param([string]$Name) return [pscustomobject]@{ Available = $true } }
+    function Ensure-GitCloneInstall {
+        param($Definition, [string]$TargetPath)
+        $script:gitCloneVerifierCalled = $true
+        return [pscustomobject]@{ Verified = $true }
+    }
+    $gitCloneResult = Ensure-Capability -Name 'test-git-clone'
+    Assert-True $script:gitCloneVerifierCalled 'available git-clone capability skipped checkout verification'
+    Assert-True $gitCloneResult.Verified 'git-clone capability did not return checkout verification result'
+
+    $script:serviceCheckoutVerifierCalled = $false
+    function Ensure-GitCloneInstall {
+        param($Definition, [string]$TargetPath)
+        $script:serviceCheckoutVerifierCalled = $true
+    }
+    function Test-ReverseTcpPort { param([int]$Port) return $true }
+    Start-AnythingAnalyzerService -Definition ([pscustomobject]@{
+        installDir = (Join-Path $scratch 'anything-analyzer')
+        repoUrl = $source
+        pinnedCommit = $pin
+        servicePort = 23816
+    }) -AuthToken 'test-token'
+    Assert-True $script:serviceCheckoutVerifierCalled 'running Anything Analyzer service skipped checkout verification'
 
     Write-Host 'PowerShell bootstrap supply-chain regression passed'
 }

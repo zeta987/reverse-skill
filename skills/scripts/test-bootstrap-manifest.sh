@@ -49,6 +49,7 @@ case "$name:${1:-}" in
     esac
     ;;
   nc:-z)
+    [[ "${STUB_NC_PREOCCUPIED:-0}" != 1 ]] || exit 0
     count=0; [[ ! -f "$STUB_NC_STATE" ]] || count="$(cat "$STUB_NC_STATE")"
     printf '%s\n' "$((count + 1))" > "$STUB_NC_STATE"
     (( count > 0 )) && exit 0 || exit 1
@@ -93,7 +94,7 @@ run_kali() {
   rm -f "$SCRATCH/nc-count"
   env PATH="$STUB_BIN:/opt/homebrew/bin:/usr/bin:/bin" HOME="$SCRATCH/home" \
     CALL_LOG="$CALL_LOG" STUB_NC_STATE="$SCRATCH/nc-count" STUB_PNPM_VERSION="${STUB_PNPM_VERSION:-}" \
-    STUB_FAIL_FETCH="${STUB_FAIL_FETCH:-0}" bash "$KALI_BOOTSTRAP" "$@"
+    STUB_FAIL_FETCH="${STUB_FAIL_FETCH:-0}" STUB_NC_PREOCCUPIED="${STUB_NC_PREOCCUPIED:-0}" bash "$KALI_BOOTSTRAP" "$@"
 }
 expect_line() { grep -Fqx "$1" "$CALL_LOG" || { echo "missing argv: $1" >&2; cat "$CALL_LOG" >&2; return 1; }; }
 expect_fragment() { grep -Fq "$1" "$CALL_LOG" || { echo "missing argv fragment: $1" >&2; cat "$CALL_LOG" >&2; return 1; }; }
@@ -215,6 +216,8 @@ if (( BASH_VERSINFO[0] >= 4 )); then
   [[ $(grep -c '|status|--porcelain|--untracked-files=all' "$CALL_LOG") -ge 2 ]]
   touch "$kali_dir/.stub-dirty"
   rejects_without_pnpm run_kali anything-analyzer --start-services --skip-refresh
+  STUB_NC_PREOCCUPIED=1 rejects_without_pnpm run_kali anything-analyzer --start-services --skip-refresh
+  expect_fragment '|status|--porcelain|--untracked-files=all'
 
   rm -rf "$kali_dir"
   : > "$CALL_LOG"
