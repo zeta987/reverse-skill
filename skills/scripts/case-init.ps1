@@ -26,6 +26,8 @@ if (-not $scriptDir) { $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.P
 $skillsRoot = Split-Path -Parent $scriptDir
 if (-not $PackageRoot) { $PackageRoot = Split-Path -Parent $skillsRoot }
 . (Join-Path (Join-Path $scriptDir 'lib') 'WorkRoot.ps1')
+. (Join-Path (Join-Path $scriptDir 'lib') 'HostRuntime.ps1')
+$HostExe = Resolve-ReverseHostExe
 $requestedProjectRoot = if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
     $ProjectRoot
 } elseif ($PSBoundParameters.ContainsKey('PackageRoot')) {
@@ -146,7 +148,7 @@ if ((Test-Path $routeScript) -and $Hint) {
     $tmpBase = if ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
     $tmp = Join-Path $tmpBase ("case-init-route-" + [guid]::NewGuid().ToString('n'))
     try {
-        & powershell -NoProfile -ExecutionPolicy Bypass -File $routeScript -Hint $Hint -OutDir $tmp 2>$null | Out-Null
+        & $HostExe -NoProfile -ExecutionPolicy Bypass -File $routeScript -Hint $Hint -OutDir $tmp 2>$null | Out-Null
         $scopeRoute = Join-Path $tmp 'route-scope.md'
         if (Test-Path $scopeRoute) {
             $rt = Get-Content $scopeRoute -Raw -Encoding UTF8
