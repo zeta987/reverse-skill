@@ -6,6 +6,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- **Windows PowerShell 5.1 encoding** — added a UTF-8 BOM to five non-ASCII `.ps1` scripts (`skills/scripts/verify-doc-facts.ps1`, `apk-reverse/scripts/frida-run.ps1`, `apk-reverse/scripts/rebuild-sign-install.ps1`, `ida-reverse/scripts/start.ps1`, `radare2/scripts/recon.ps1`). Without a BOM, PS 5.1 parses these files as the system ANSI codepage and garbles their Chinese / em-dash string literals; `verify-doc-facts.ps1` was failing four checks under 5.1 (CI only ran it under `pwsh`, which defaults to UTF-8). CI now guards every non-ASCII `.ps1` for a BOM.
 
 ## [1.0.1] — 2026-08-08
 ### Added
