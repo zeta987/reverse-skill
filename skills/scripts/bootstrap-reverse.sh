@@ -133,7 +133,8 @@ make_temp_file() {
   local suffix="${1:-download}"
   local tmp_dir
   tmp_dir="$(mktemp -d /tmp/reverse-bootstrap-XXXXXX)"
-  printf '%s/%s\n' "$tmp_dir" "$suffix"
+  printf '%s/%s
+' "$tmp_dir" "$suffix"
 }
 
 sudo_cmd() {
@@ -302,6 +303,8 @@ ensure_pnpm() {
   fi
 }
 
+# Args: repo regex [release_tag]
+# Prints: url\tdigest_or_empty
 latest_github_asset_meta() {
   local repo="$1"
   local regex="$2"
@@ -332,6 +335,8 @@ latest_github_asset_url() {
   latest_github_asset_meta "$repo" "$regex" "$tag" | cut -f1
 }
 
+# verify_sha256 file expected_or_empty [github_digest]
+# expected may be "hex" or "sha256:hex"; github_digest same. Prefer expected.
 verify_sha256() {
   local file="$1"
   local expected="$2"
@@ -369,9 +374,18 @@ extract_archive() {
   safe_remove_install_dir "$dest" "$dest.tmp"
   mkdir -p "$dest"
   case "$archive" in
-    *.zip) unzip -q "$archive" -d "$dest.tmp" ;;
-    *.tar.gz|*.tgz) mkdir -p "$dest.tmp"; tar -xzf "$archive" -C "$dest.tmp" ;;
-    *) mkdir -p "$dest"; cp "$archive" "$dest/"; return 0 ;;
+    *.zip)
+      unzip -q "$archive" -d "$dest.tmp"
+      ;;
+    *.tar.gz|*.tgz)
+      mkdir -p "$dest.tmp"
+      tar -xzf "$archive" -C "$dest.tmp"
+      ;;
+    *)
+      mkdir -p "$dest"
+      cp "$archive" "$dest/"
+      return 0
+      ;;
   esac
   local top_count
   top_count=$(find "$dest.tmp" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')
@@ -383,6 +397,7 @@ extract_archive() {
   case "$dest.tmp" in /tmp/reverse-bootstrap-*|"$TOOLS_ROOT"/*.tmp) rm -rf "$dest.tmp" ;; esac
 }
 
+# install_github_release repo regex dest [release_tag] [expected_sha256]
 install_github_release() {
   local repo="$1"
   local regex="$2"
@@ -548,7 +563,7 @@ out.append(f'[mcp_servers.{name}]')
 for key in ('type', 'url', 'command', 'args', 'bearer_token_env_var'):
     if key in payload:
         out.append(f'{key} = {literal(payload[key])}')
-for key in sorted(k for k in payload if k not in {'type','url','command','args','bearer_token_env_var','env','headers'}):
+for key in sorted(k for k in payload if k not in {'type', 'url', 'command', 'args', 'bearer_token_env_var', 'env', 'headers'}):
     out.append(f'{key} = {literal(payload[key])}')
 env = payload.get('env')
 if isinstance(env, dict) and env:
@@ -569,8 +584,12 @@ write_mcp_server() {
       LAST_CAPABILITY_REGISTRATION_REQUIRED=true
       log_warn "MCP registration skipped for '$name' (client-neutral default). Re-run with --mcp-host=claude, codex, or both."
       ;;
-    claude) write_claude_mcp_server "$name" "$json_payload" ;;
-    codex) write_codex_mcp_server "$name" "$json_payload" ;;
+    claude)
+      write_claude_mcp_server "$name" "$json_payload"
+      ;;
+    codex)
+      write_codex_mcp_server "$name" "$json_payload"
+      ;;
     both)
       write_claude_mcp_server "$name" "$json_payload"
       write_codex_mcp_server "$name" "$json_payload"
@@ -583,7 +602,9 @@ test_tcp_port() {
   python3 - "$port" <<'PY' >/dev/null 2>&1
 import socket, sys
 port=int(sys.argv[1])
-s=socket.socket(); s.settimeout(1); s.connect(('127.0.0.1', port))
+s=socket.socket()
+s.settimeout(1)
+s.connect(('127.0.0.1', port))
 PY
 }
 
@@ -592,9 +613,15 @@ test_mcp_http() {
   local timeout_seconds="${2:-3}"
   python3 - "$port" "$timeout_seconds" <<'PY' >/dev/null 2>&1
 import sys, json, urllib.request
-port = int(sys.argv[1]); timeout = int(sys.argv[2])
+port = int(sys.argv[1])
+timeout = int(sys.argv[2])
 body = json.dumps({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}).encode()
-req = urllib.request.Request(f"http://127.0.0.1:{port}/mcp", data=body, headers={"Content-Type": "application/json"}, method="POST")
+req = urllib.request.Request(
+    f"http://127.0.0.1:{port}/mcp",
+    data=body,
+    headers={"Content-Type": "application/json"},
+    method="POST"
+)
 try:
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         exit(0 if resp.status == 200 else 1)
@@ -621,7 +648,10 @@ manual_required() {
   log_warn "MANUAL_INSTALL_REQUIRED: $name — $hint"
 }
 
-is_ready_cmd() { local cmd="$1"; has_cmd "$cmd"; }
+is_ready_cmd() {
+  local cmd="$1"
+  has_cmd "$cmd"
+}
 
 ensure_jeb_pro() {
   if has_cmd jeb_wincon || has_cmd jeb; then
@@ -656,7 +686,8 @@ ensure_apktool() {
     linux)
       if install_apt apktool; then return 0; fi
       ensure_dir "$TOOLS_ROOT/apktool"
-      local meta url digest jar wrapper repo tag sha re
+      local meta url digest jar wrapper
+      local repo tag sha re
       repo=$(manifest_field apktool repo) || return 1
       tag=$(manifest_field apktool releaseTag) || return 1
       sha=$(manifest_field apktool assetSha256) || return 1
@@ -722,7 +753,9 @@ ensure_anything_analyzer() {
   local repo commit
   repo=$(manifest_field anything-analyzer repoUrl) || return 1
   commit=$(manifest_field anything-analyzer pinnedCommit) || return 1
-  if ! has_cmd git; then case "$PLATFORM" in macos) install_brew git ;; linux) install_apt git ;; esac; fi
+  if ! has_cmd git; then
+    case "$PLATFORM" in macos) install_brew git ;; linux) install_apt git ;; esac
+  fi
   install_git_commit "$repo" "$commit" "$dir" || return 1
   ensure_node_runtime || return 1
   ensure_pnpm || return 1
@@ -730,9 +763,20 @@ ensure_anything_analyzer() {
   if $START_SERVICES; then
     (cd "$dir" && pnpm install --frozen-lockfile) || return 1
     install_git_commit "$repo" "$commit" "$dir" || return 1
-    (cd "$dir" || exit 1; if has_cmd nohup; then nohup pnpm dev >/tmp/anything-analyzer.log 2>&1 & else pnpm dev >/tmp/anything-analyzer.log 2>&1 & fi)
+    (
+      cd "$dir" || exit 1
+      if has_cmd nohup; then
+        nohup pnpm dev >/tmp/anything-analyzer.log 2>&1 &
+      else
+        pnpm dev >/tmp/anything-analyzer.log 2>&1 &
+      fi
+    )
     if wait_for_port 23816 120; then
-      if test_mcp_http 23816; then log_ok "anything-analyzer MCP server ready on port 23816 (HTTP verified)"; else log_warn "anything-analyzer port 23816 open but MCP HTTP handshake failed; check /tmp/anything-analyzer.log"; fi
+      if test_mcp_http 23816; then
+        log_ok "anything-analyzer MCP server ready on port 23816 (HTTP verified)"
+      else
+        log_warn "anything-analyzer port 23816 open but MCP HTTP handshake failed; check /tmp/anything-analyzer.log"
+      fi
     else
       log_warn "anything-analyzer did not open port 23816; see /tmp/anything-analyzer.log"
     fi
@@ -744,11 +788,19 @@ ensure_idapro() {
   write_mcp_server "idapro" '{"url":"http://127.0.0.1:13337/mcp"}'
   if $START_SERVICES; then
     case "$PLATFORM" in
-      linux) log_warn "Linux package does not include an IDA GUI launcher. Start IDA manually and ensure MCP listens on 127.0.0.1:13337." ;;
-      macos) log_warn "Start IDA Pro manually on macOS and confirm MCP port in the IDA Output window." ;;
+      linux)
+        log_warn "Linux package does not include an IDA GUI launcher. Start IDA manually and ensure MCP listens on 127.0.0.1:13337."
+        ;;
+      macos)
+        log_warn "Start IDA Pro manually on macOS and confirm MCP port in the IDA Output window."
+        ;;
     esac
     wait_for_port 13337 45 || log_warn "idapro MCP service is not online on port 13337 yet."
-    if test_mcp_http 13337 3; then log_ok "idapro MCP server ready (HTTP verified)"; else log_warn "idapro port 13337 open but MCP HTTP handshake failed; check IDA Output window"; fi
+    if test_mcp_http 13337 3; then
+      log_ok "idapro MCP server ready (HTTP verified)"
+    else
+      log_warn "idapro port 13337 open but MCP HTTP handshake failed; check IDA Output window"
+    fi
   fi
 }
 
@@ -756,7 +808,10 @@ ensure_r2() {
   if has_cmd r2; then log_ok "r2 ready: $(cmd_path r2)"; return 0; fi
   case "$PLATFORM" in
     macos) install_brew radare2 ;;
-    linux) if install_apt radare2; then return 0; fi; manual_required r2 "Install radare2 from GitHub/source: https://github.com/radareorg/radare2" ;;
+    linux)
+      if install_apt radare2; then return 0; fi
+      manual_required r2 "Install radare2 from GitHub/source: https://github.com/radareorg/radare2"
+      ;;
   esac
 }
 
@@ -785,8 +840,17 @@ ensure_ghidra_mcp() {
   repo=$(manifest_field ghidra-mcp repo) || return 1
   regex=$(manifest_field ghidra-mcp assetRegex) || return 1
   case "$PLATFORM" in
-    macos) if ! has_cmd ghidraRun && [[ ! -d /Applications/Ghidra.app ]]; then install_brew ghidra || brew install --cask ghidra || true; fi ;;
-    linux) if ! has_cmd ghidraRun; then install_github_release "$repo" "$regex" "$TOOLS_ROOT/ghidra" || manual_required ghidra-mcp "Install Ghidra from GitHub release or Flatpak, then configure ghidra-mcp if used."; fi ;;
+    macos)
+      if ! has_cmd ghidraRun && [[ ! -d /Applications/Ghidra.app ]]; then
+        install_brew ghidra || brew install --cask ghidra || true
+      fi
+      ;;
+    linux)
+      if ! has_cmd ghidraRun; then
+        install_github_release "$repo" "$regex" "$TOOLS_ROOT/ghidra" || \
+          manual_required ghidra-mcp "Install Ghidra from GitHub release or Flatpak, then configure ghidra-mcp if used."
+      fi
+      ;;
   esac
   log_warn "ghidra-mcp requires local Ghidra MCP plugin/server setup. See docs/platforms/$( [[ "$PLATFORM" == macos ]] && echo macos || echo linux ).md"
 }
@@ -807,7 +871,12 @@ ensure_proxycat() {
   local repo commit
   repo=$(manifest_field proxycat repo) || return 1
   commit=$(manifest_field proxycat pinnedCommit) || return 1
-  pipx install "git+${repo}@${commit}" || { manual_required proxycat "Clone/install ProxyCat manually; verify command 'proxycat'."; LAST_CAPABILITY_MANUAL=true; MANUAL_REQUIRED=true; return 0; }
+  pipx install "git+${repo}@${commit}" || {
+    manual_required proxycat "Clone/install ProxyCat manually; verify command 'proxycat'."
+    LAST_CAPABILITY_MANUAL=true
+    MANUAL_REQUIRED=true
+    return 0
+  }
 }
 
 ensure_burpsuite_mcp() {
@@ -840,16 +909,28 @@ PY
 ensure_pentestswarm() {
   local pentestswarm_path
   pentestswarm_path="$(cmd_path pentestswarm)"
-  if [[ -n "$pentestswarm_path" ]]; then register_pentestswarm_mcp "$pentestswarm_path"; log_ok "pentestswarm ready"; return 0; fi
-  if ! has_cmd go; then case "$PLATFORM" in macos) install_brew go ;; linux) install_apt golang-go ;; esac; fi
+  if [[ -n "$pentestswarm_path" ]]; then
+    register_pentestswarm_mcp "$pentestswarm_path"
+    log_ok "pentestswarm ready"
+    return 0
+  fi
+  if ! has_cmd go; then
+    case "$PLATFORM" in macos) install_brew go ;; linux) install_apt golang-go ;; esac
+  fi
   local go_package docker_image
   go_package=$(manifest_field pentestswarm goPackage) || return 1
   docker_image=$(manifest_field pentestswarm dockerImage) || return 1
   if go install "$go_package"; then
     local go_bin
     go_bin="$(go env GOBIN 2>/dev/null || true)"
-    if [[ -z "$go_bin" ]]; then go_bin="$(go env GOPATH 2>/dev/null || true)/bin"; fi
-    if [[ -x "$go_bin/pentestswarm" ]]; then register_pentestswarm_mcp "$go_bin/pentestswarm"; log_ok "pentestswarm installed and registered"; return 0; fi
+    if [[ -z "$go_bin" ]]; then
+      go_bin="$(go env GOPATH 2>/dev/null || true)/bin"
+    fi
+    if [[ -x "$go_bin/pentestswarm" ]]; then
+      register_pentestswarm_mcp "$go_bin/pentestswarm"
+      log_ok "pentestswarm installed and registered"
+      return 0
+    fi
     log_warn "pentestswarm installed but no executable was found in GOBIN/GOPATH; trying Docker fallback"
   fi
   if has_cmd docker; then
@@ -866,12 +947,18 @@ PY
 
 ensure_binwalk() {
   if has_cmd binwalk; then log_ok "binwalk ready: $(cmd_path binwalk)"; return 0; fi
-  case "$PLATFORM" in macos) install_brew binwalk ;; linux) install_apt binwalk || manual_required binwalk "git clone https://github.com/ReFirmLabs/binwalk.git and install manually" ;; esac
+  case "$PLATFORM" in
+    macos) install_brew binwalk ;;
+    linux) install_apt binwalk || manual_required binwalk "git clone https://github.com/ReFirmLabs/binwalk.git and install manually" ;;
+  esac
 }
 
 ensure_yara() {
   if has_cmd yara; then log_ok "yara ready: $(cmd_path yara)"; return 0; fi
-  case "$PLATFORM" in macos) install_brew yara ;; linux) install_apt yara || manual_required yara "Install from source: https://github.com/VirusTotal/yara" ;; esac
+  case "$PLATFORM" in
+    macos) install_brew yara ;;
+    linux) install_apt yara || manual_required yara "Install from source: https://github.com/VirusTotal/yara" ;;
+  esac
 }
 
 ensure_pwntools() {
@@ -886,7 +973,11 @@ status_json_line() {
   local name="$1"
   local status="$2"
   local extra="${3:-}"
-  if [[ -n "$extra" ]]; then printf '{"name":"%s","status":"%s","note":"%s"}\n' "$name" "$status" "$extra"; else printf '{"name":"%s","status":"%s"}\n' "$name" "$status"; fi
+  if [[ -n "$extra" ]]; then
+    printf '{"name":"%s","status":"%s","note":"%s"}\n' "$name" "$status" "$extra"
+  else
+    printf '{"name":"%s","status":"%s"}\n' "$name" "$status"
+  fi
 }
 
 cap_depends() {
@@ -904,7 +995,10 @@ expand_capabilities() {
   local cap dep
   for cap in "$@"; do
     for dep in $(cap_depends "$cap"); do
-      if [[ "$seen" != *" $dep "* ]]; then out+=("$dep"); seen+="$dep "; fi
+      if [[ "$seen" != *" $dep "* ]]; then
+        out+=("$dep")
+        seen+="$dep "
+      fi
     done
   done
   printf '%s\n' "${out[@]}"
@@ -941,6 +1035,8 @@ ensure_capability() {
 RESULTS_FILE="$(mktemp)"
 trap 'rm -f "$RESULTS_FILE"' EXIT
 
+# macOS ships Bash 3.2, which has no mapfile/readarray. Keep this path portable
+# instead of requiring users to install a newer Bash just to run the bootstrapper.
 EXPANDED=()
 while IFS= read -r capability; do
   [[ -n "$capability" ]] || continue
