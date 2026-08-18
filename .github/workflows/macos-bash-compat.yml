@@ -37,6 +37,10 @@ jobs:
             echo "syntax OK: $f"
           done
 
+      - name: Client-neutral bootstrap/discovery
+        shell: bash
+        run: /bin/bash skills/scripts/test-client-neutral-bootstrap.sh
+
       - name: Exercise structured router and case contract
         shell: bash
         run: |
