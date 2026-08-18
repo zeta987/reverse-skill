@@ -10,10 +10,10 @@ description: Routes reverse engineering, exploitation, penetration testing, malw
 
 读完本文件后，不允许只回复“已读/已理解”。必须按顺序执行：
 
-1. `NOW`：读 `MASTER-ROUTING.md`（或跑 `scripts/master-route.ps1 -Hint "..."`）定 PRIMARY；疑难再读 `routing.md` 三轴表。
-2. `NOW`：`scripts/case-init.ps1` 落地 `work/<case>/scope.md`（契约见 `ops/scope-contract.md`）；**auth 未 granted 禁止对目标 ACT**。
+1. `NOW`：读 `MASTER-ROUTING.md`（或跑平台原生 router：Windows `scripts/master-route.ps1`；Linux/macOS/Kali `scripts/master-route.sh`）定 PRIMARY；疑难再读 `routing.md` 三轴表。
+2. `NOW`：平台原生 `case-init` 落地当前分析项目的 `work/<case>/scope.md`（Windows `scripts/case-init.ps1`；Linux/macOS/Kali `scripts/case-init.sh`；契约见 `ops/scope-contract.md`）；**auth 未 granted 禁止对目标 ACT**。本地离线样本使用 `offline-sample` preset + explicit sample；Force 不得绕过硬门。
 3. `NOW`：按 `ops/role-map.md` 标 lead/specialist；立即打开 PRIMARY `SKILL.md` 执行 ACTION REQUIRED。
-4. `NEXT`：涉及本机工具时读 `tool-index.md`；**禁止猜路径**；缺工具 → `bootstrap-reverse.ps1`（仅 manifest）。
+4. `NEXT`：涉及本机工具时读 `tool-index.md`；**禁止猜路径**；缺工具 → 平台原生 bootstrap（仅 manifest）。
 5. `ACT`：执行并 **追加 timeline / 更新 workitems**；结论用 Evidence→Finding→Path（`ops/evidence-finding-path.md`）。
 6. 结束：`docs-generator` 报告 + 脱敏 `field-journal`；阶段菜单 3–6 项。
 
@@ -83,7 +83,7 @@ description: Routes reverse engineering, exploitation, penetration testing, malw
 
 遇到逆向、CTF、抓包、前端签名、APK 改包、二进制分析类任务时，先按这个顺序进入：
 
-1. `MASTER-ROUTING.md` 或 `scripts/master-route.ps1` → PRIMARY  
+1. `MASTER-ROUTING.md` 或平台原生 router（Windows `scripts/master-route.ps1`；Linux/macOS/Kali `scripts/master-route.sh`）→ PRIMARY  
 2. 疑难时再读 `routing.md` 三轴全表  
 3. 打开 PRIMARY 子模块 `SKILL.md`  
 4. 需要本机路径时再读 `tool-index.md`  
@@ -137,10 +137,21 @@ description: Routes reverse engineering, exploitation, penetration testing, malw
 
 ## 按需自举
 
-当 workflow 发现缺少工具时，不要直接报错。统一调用：
+当 workflow 发现缺少工具时，不要直接报错。统一调用平台原生 bootstrap：
 
+Windows：
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "<skill-root>\scripts\bootstrap-reverse.ps1" -Capability @('工具名') -StartServices
+```
+
+Linux / macOS：
+```bash
+bash <skill-root>/scripts/bootstrap-reverse.sh 工具名 --start-services
+```
+
+Kali：
+```bash
+bash <package-root>/kali/scripts/bootstrap-reverse.sh 工具名 --start-services
 ```
 
 支持的能力（以 `scripts/bootstrap-manifest.json` 为准）：jadx、apktool、jeb-pro、frida、frida-ps、idalib-mcp、reqable-mcp、jshookmcp、anything-analyzer、idapro、r2、rabin2、adb、agent-browser、ghidra-mcp、seclists、proxycat、burpsuite-mcp、nmap、pentestswarm、binwalk、yara、pwntools、bkcrack
