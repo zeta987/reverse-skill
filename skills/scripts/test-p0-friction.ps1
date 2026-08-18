@@ -145,7 +145,7 @@ foreach ($zc in $zhCases) {
     else { Bad ("zh route miss {0}: {1}" -f $zc.Expect, ($raw.Substring(0, [Math]::Min(120, $raw.Length)))) }
 }
 
-# 9) case-guard: ready case exits 0; bare pending exits 2
+# 9) case-guard: ready case exits 0; bare pending exits 2 even with -Force
 $cg = Join-Path $scriptDir 'case-guard.ps1'
 & powershell -NoProfile -ExecutionPolicy Bypass -File $cg -CaseRoot $caseRoot 2>&1 | Out-Null
 if ($LASTEXITCODE -eq 0) { Ok 'case-guard ready exit 0' } else { Bad "case-guard ready exit $LASTEXITCODE" }
@@ -153,7 +153,7 @@ $bareRoot = Join-Path $PackageRoot ("work\{0}" -f $bareName)
 & powershell -NoProfile -ExecutionPolicy Bypass -File $cg -CaseRoot $bareRoot 2>&1 | Out-Null
 if ($LASTEXITCODE -eq 2) { Ok 'case-guard pending exit 2' } else { Bad "case-guard pending expected 2 got $LASTEXITCODE" }
 & powershell -NoProfile -ExecutionPolicy Bypass -File $cg -CaseRoot $bareRoot -Force 2>&1 | Out-Null
-if ($LASTEXITCODE -eq 0) { Ok 'case-guard -Force exit 0' } else { Bad "case-guard -Force exit $LASTEXITCODE" }
+if ($LASTEXITCODE -eq 2) { Ok 'case-guard -Force cannot bypass hard gate' } else { Bad "case-guard -Force expected 2 got $LASTEXITCODE" }
 
 # 10) AuthGranted must not be clobbered by junk AuthStatus / multi-asset lab init
 # Note: -ProjectRoot is passed explicitly to prevent the -InScopeAssets array
