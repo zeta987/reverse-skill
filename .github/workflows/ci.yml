@@ -24,7 +24,7 @@ jobs:
         shell: bash
         run: sudo ln -sf "$(command -v pwsh)" /usr/local/bin/powershell
 
-      - name: Routing regression (163 cases)
+      - name: Routing regression
         shell: pwsh
         run: ./skills/scripts/test-routing.ps1
 
@@ -58,8 +58,8 @@ jobs:
             -Sample $sample
           $scope = Join-Path $scratch 'work/offline-sample/scope.md'
           $raw = Get-Content $scope -Raw
-          if ($raw -notmatch '(?m)^- mode: offline$') { throw 'offline sample did not keep offline network mode' }
-          if ($raw -notmatch '(?m)^- ready_for_act: true$') { throw 'offline sample did not become ready_for_act' }
+          if ($raw -notmatch '(?m)^- mode: offline\r?$') { throw 'offline sample did not keep offline network mode' }
+          if ($raw -notmatch '(?m)^- ready_for_act: true\r?$') { throw 'offline sample did not become ready_for_act' }
           ./skills/scripts/case-guard.ps1 -CaseRoot (Join-Path $scratch 'work/offline-sample')
 
           ./skills/scripts/case-init.ps1 `
