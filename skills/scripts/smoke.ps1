@@ -63,7 +63,8 @@ $scripts = @(
     'verify-routing-coherence.ps1',
     'master-route.ps1',
     'case-init.ps1',
-    'lib\WorkRoot.ps1',
+    'lib/WorkRoot.ps1',
+    'lib/RouteScope.ps1',
     'bootstrap-reverse.ps1',
     'refresh-tool-index.ps1',
     'smoke.ps1',
@@ -100,11 +101,12 @@ foreach ($name in $scripts) {
     }
 }
 $idaScripts = @(
-    'ida-reverse\scripts\start.ps1',
-    'ida-reverse\scripts\open.ps1',
-    'ida-reverse\scripts\watchdog.ps1',
-    'ida-reverse\scripts\install-autostart.ps1',
-    'ida-reverse\scripts\start-gui.ps1'
+    'ida-reverse/scripts/start.ps1',
+    'ida-reverse/scripts/open.ps1',
+    'ida-reverse/scripts/watchdog.ps1',
+    'ida-reverse/scripts/install-autostart.ps1',
+    'ida-reverse/scripts/start-gui.ps1',
+    'ida-reverse/scripts/IdaOpenHelpers.ps1'
 )
 foreach ($rel in $idaScripts) {
     $p = Join-Path $skillsRoot $rel
@@ -182,8 +184,8 @@ if (-not (Test-Path -LiteralPath $appendEvidence)) {
     if ($firstEvidenceExit -ne 0) {
         Bad ("initial Evidence append exit {0}" -f $firstEvidenceExit)
     } else {
-        $evidencePath = Join-Path $evidenceCase 'evidence\E-IMMUTABLE.md'
-        $indexPath = Join-Path $evidenceCase 'evidence\INDEX.md'
+        $evidencePath = Join-Path $evidenceCase 'evidence/E-IMMUTABLE.md'
+        $indexPath = Join-Path $evidenceCase 'evidence/INDEX.md'
         $beforeEvidence = (Get-FileHash -LiteralPath $evidencePath -Algorithm SHA256).Hash
         $beforeIndex = (Get-FileHash -LiteralPath $indexPath -Algorithm SHA256).Hash
 

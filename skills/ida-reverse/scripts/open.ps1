@@ -191,18 +191,11 @@ if (-not $isTempCopy -and $Path -match "C:\\Windows\\System32") {
     }
 }
 
+. (Join-Path $PSScriptRoot 'IdaOpenHelpers.ps1')
+
 if (-not $isTempCopy) {
-    $dir = [System.IO.Path]::GetDirectoryName($Path)
-    $base = [System.IO.Path]::GetFileNameWithoutExtension($Path)
-    $oldExts = @('.id0', '.id1', '.id2', '.nam', '.til', '.i64', '.idb')
-    $hasLocked = $false
-    foreach ($ext in $oldExts) {
-        $f = Join-Path $dir "$base$ext"
-        if (Test-Path -LiteralPath $f) {
-            Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue
-            if (Test-Path -LiteralPath $f) { $hasLocked = $true }
-        }
-    }
+    $lockPlan = Get-IdaOpenLockPlan -BinaryPath $Path
+    $hasLocked = [bool]$lockPlan.PreferTempCopy
     if ($hasLocked) {
         $guid = [System.Guid]::NewGuid().ToString('N').Substring(0, 8)
         $newName = "$guid-$([System.IO.Path]::GetFileName($Path))"
