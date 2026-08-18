@@ -99,6 +99,35 @@ foreach ($name in $scripts) {
         [void]$parseLog.Add("OK $name")
     }
 }
+$idaScripts = @(
+    'ida-reverse\scripts\start.ps1',
+    'ida-reverse\scripts\open.ps1',
+    'ida-reverse\scripts\watchdog.ps1',
+    'ida-reverse\scripts\install-autostart.ps1',
+    'ida-reverse\scripts\start-gui.ps1'
+)
+foreach ($rel in $idaScripts) {
+    $p = Join-Path $skillsRoot $rel
+    $name = $rel
+    if (-not (Test-Path -LiteralPath $p)) {
+        Bad ("script missing: {0}" -f $name)
+        $parseFail++
+        [void]$parseLog.Add("MISSING $name")
+        continue
+    }
+    $errs = $null
+    $tokens = $null
+    $null = [System.Management.Automation.Language.Parser]::ParseFile($p, [ref]$tokens, [ref]$errs)
+    if ($errs -and $errs.Count -gt 0) {
+        Bad ("parse fail {0}: {1}" -f $name, $errs[0].Message)
+        $parseFail++
+        [void]$parseLog.Add("FAIL $name $($errs[0].Message)")
+    } else {
+        Ok ("parse {0}" -f $name)
+        $parseOk++
+        [void]$parseLog.Add("OK $name")
+    }
+}
 $parseLog -join [Environment]::NewLine | Set-Content (Join-Path $LogDir '02-parse.txt') -Encoding UTF8
 
 # --- 3) master-route sample matrix ---
