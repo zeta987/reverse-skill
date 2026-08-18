@@ -23,7 +23,7 @@ STUB
   chmod +x "$BIN_DIR/$name"
 done
 
-export PATH="$BIN_DIR:/usr/bin:/bin"
+export PATH="$BIN_DIR:$PATH"
 export HOME="$HOME_DIR"
 export REVERSE_SKILL_TOOLS_DIR="$TOOLS_DIR"
 export CLAUDE_MCP_CONFIG="$CLAUDE_CFG"
