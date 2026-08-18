@@ -70,7 +70,9 @@ jobs:
           & powershell -NoProfile -ExecutionPolicy Bypass -File ./skills/scripts/case-guard.ps1 `
             -CaseRoot (Join-Path $scratch 'work/force-auth') `
             -Force
-          if ($LASTEXITCODE -eq 0) { throw '-Force bypassed auth.status hard gate' }
+          $guardExit = $LASTEXITCODE
+          if ($guardExit -eq 0) { throw '-Force bypassed auth.status hard gate' }
+          $global:LASTEXITCODE = 0
 
       - name: Smoke (verify + parse + quick route)
         shell: pwsh
