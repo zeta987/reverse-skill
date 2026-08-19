@@ -183,8 +183,15 @@ function Get-ReverseToolCatalog {
             VersionArgs = @('-v')
             Fallbacks = @(
                 [pscustomobject]@{ Type = 'command'; Value = 'r2' },
+                [pscustomobject]@{ Type = 'command'; Value = 'radare2' },
+                [pscustomobject]@{ Type = 'path'; Value = (Join-Path $userProfile 'Tools\radare2\bin\r2.bat') },
+                [pscustomobject]@{ Type = 'path'; Value = (Join-Path $userProfile 'Tools\radare2\bin\radare2.exe') },
                 [pscustomobject]@{ Type = 'path'; Value = (Join-Path $userProfile 'Tools\radare2\bin\r2.exe') },
+                [pscustomobject]@{ Type = 'path'; Value = (Join-Path $userProfile 'Tools\radare2\r2.bat') },
+                [pscustomobject]@{ Type = 'path'; Value = (Join-Path $userProfile 'Tools\radare2\radare2.exe') },
                 [pscustomobject]@{ Type = 'path'; Value = (Join-Path $userProfile 'Tools\radare2\r2.exe') },
+                [pscustomobject]@{ Type = 'path'; Value = 'C:\Tools\radare2\bin\r2.bat' },
+                [pscustomobject]@{ Type = 'path'; Value = 'C:\Tools\radare2\bin\radare2.exe' },
                 [pscustomobject]@{ Type = 'path'; Value = 'C:\Tools\radare2\bin\r2.exe' }
             )
         }
