@@ -49,6 +49,11 @@ jobs:
         shell: pwsh
         run: ./skills/scripts/test-workflow-title-safety.ps1
 
+      - name: Client-neutral bootstrap/discovery (Windows PowerShell 5.1)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./skills/scripts/test-client-neutral-bootstrap.ps1
+
       - name: Offline sample case contract (Windows PowerShell 5.1)
         if: runner.os == 'Windows'
         shell: powershell
@@ -128,6 +133,10 @@ jobs:
             bash -n "$f"
             echo "syntax OK: $f"
           done < <(git ls-files '*.sh')
+
+      - name: Client-neutral bootstrap/discovery (Bash)
+        shell: bash
+        run: bash skills/scripts/test-client-neutral-bootstrap.sh
 
       - name: Structured routing parity (Bash)
         shell: bash

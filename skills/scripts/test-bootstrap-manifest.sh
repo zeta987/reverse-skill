@@ -75,7 +75,7 @@ chmod +x "$STUB_BIN/python3"
 json_value() {
   "$REAL_PYTHON" - "$MANIFEST" "$1" "$2" <<'PY'
 import json, pathlib, sys
-d=json.loads(pathlib.Path(sys.argv[1]).read_text())
+d=json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
 if sys.argv[2] == 'dependency': v=d['bootstrapDependencies'][sys.argv[3]]['package']
 else: v=next(x for x in d['capabilities'] if x['name']==sys.argv[2])[sys.argv[3]]
 print(v)
@@ -142,9 +142,9 @@ mkdir -p "$BROKEN_DIR"
 cp "$BOOTSTRAP" "$BROKEN_DIR/bootstrap-reverse.sh"
 "$REAL_PYTHON" - "$MANIFEST" "$BROKEN_DIR/bootstrap-manifest.json" <<'PY'
 import json, pathlib, sys
-data = json.loads(pathlib.Path(sys.argv[1]).read_text())
+data = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
 next(x for x in data['capabilities'] if x['name'] == 'agent-browser')['npmPackage'] = ''
-pathlib.Path(sys.argv[2]).write_text(json.dumps(data))
+pathlib.Path(sys.argv[2]).write_text(json.dumps(data), encoding='utf-8')
 PY
 : > "$CALL_LOG"
 set +e

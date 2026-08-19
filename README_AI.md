@@ -108,6 +108,15 @@ bash skills/scripts/case-guard.sh --case-root work/my-sample
 bash skills/scripts/bootstrap-reverse.sh --list
 ```
 
+MCP client registration is opt-in. Bootstrap defaults to installing or preparing the capability without writing client-global configuration. Select the target explicitly when registration is required:
+
+```text
+Windows: powershell -File skills/scripts/bootstrap-reverse.ps1 -Capability jshookmcp -McpHostTarget Codex
+Linux/macOS: bash skills/scripts/bootstrap-reverse.sh jshookmcp --mcp-host=codex
+```
+
+Use `Claude` / `claude` or `Both` / `both` for other supported targets.
+
 Kali users should use the dedicated Kali bootstrap entrypoint:
 
 ```bash
@@ -371,7 +380,7 @@ Whether you use Claude Code, Codex CLI, Cursor, Cline, Windsurf, or another code
 }
 ```
 
-The bootstrap command enables bearer authentication for Anything Analyzer and registers the generated token for supported clients. Manual configurations must include the `Authorization` header shown above.
+The bootstrap command enables bearer authentication for Anything Analyzer. It registers the generated token only when an MCP host is explicitly selected (`-McpHostTarget` or `--mcp-host`). Manual configurations must include the `Authorization` header shown above.
 
 ### Minimum Prompt Requirements
 
