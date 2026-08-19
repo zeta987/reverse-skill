@@ -309,5 +309,3 @@ Special thanks to the OLLVM deobfuscation ecosystem contributors and everyone wh
 This project is intended solely for lawful security research, education, CTF competitions, and testing of systems that you own or have explicit authorization to assess.
 
 **Unauthorized access, scanning, exploitation, disruption, data acquisition, or any other use against systems without prior permission is strictly prohibited.** Users are solely responsible for complying with applicable laws, regulations, and the authorized scope of testing. The maintainers accept no liability for misuse of this project or for any resulting damage or legal consequences.
-
-**免责声明：** 本项目仅限用于合法的安全研究、教育、CTF 竞赛，以及对自有系统或已获得明确授权的目标进行测试。严禁在未经授权的情况下访问、扫描、利用、干扰目标或获取数据。使用者须自行确保其行为符合适用法律法规及授权范围；因滥用本项目造成的任何损失或法律责任，均由使用者自行承担。
