@@ -49,6 +49,51 @@ jobs:
         shell: pwsh
         run: ./skills/scripts/test-workflow-title-safety.ps1
 
+      - name: Offline sample case contract (Windows PowerShell 5.1)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $scratch = Join-Path $env:RUNNER_TEMP ("reverse-skill-offline-" + [guid]::NewGuid().ToString('n'))
+          New-Item -ItemType Directory -Force -Path $scratch | Out-Null
+          $sample = Join-Path $scratch 'sample.apk'
+          Set-Content -Path $sample -Value 'fixture' -Encoding ASCII
+
+          ./skills/scripts/case-init.ps1 `
+            -Hint "offline apk" `
+            -CaseName "offline-sample" `
+            -ProjectRoot $scratch `
+            -Preset offline-sample `
+            -Sample $sample
+          $scope = Join-Path $scratch 'work/offline-sample/scope.md'
+          $raw = Get-Content $scope -Raw
+          if ($raw -notmatch '(?m)^- mode: offline\r?$') { throw 'offline sample did not keep offline network mode' }
+          if ($raw -notmatch '(?m)^- ready_for_act: true\r?$') { throw 'offline sample did not become ready_for_act' }
+          ./skills/scripts/case-guard.ps1 -CaseRoot (Join-Path $scratch 'work/offline-sample')
+
+          try {
+            ./skills/scripts/case-init.ps1 `
+              -Hint "missing offline apk" `
+              -CaseName "missing-sample" `
+              -ProjectRoot $scratch `
+              -Preset offline-sample `
+              -Sample (Join-Path $scratch 'missing.apk')
+            throw 'missing offline sample was accepted'
+          } catch {
+            if ($_.Exception.Message -eq 'missing offline sample was accepted') { throw }
+          }
+
+          ./skills/scripts/case-init.ps1 `
+            -Hint "pending offline apk" `
+            -CaseName "force-auth" `
+            -ProjectRoot $scratch `
+            -Sample $sample
+          & powershell -NoProfile -ExecutionPolicy Bypass -File ./skills/scripts/case-guard.ps1 `
+            -CaseRoot (Join-Path $scratch 'work/force-auth') `
+            -Force
+          $guardExit = $LASTEXITCODE
+          if ($guardExit -eq 0) { throw '-Force bypassed auth.status hard gate' }
+          $global:LASTEXITCODE = 0
+
       - name: Smoke (verify + parse + quick route)
         shell: pwsh
         run: ./skills/scripts/smoke.ps1
@@ -94,6 +139,47 @@ jobs:
           scratch="$(mktemp -d)"
           trap 'rm -rf "$scratch"' EXIT
 
+          # Fresh Linux journey: no pwsh required, artifacts stay in caller project.
+          caller="$scratch/caller-project"
+          mkdir -p "$caller"
+          printf 'fixture' > "$scratch/sample.apk"
+          (
+            cd "$caller"
+            bash "$GITHUB_WORKSPACE/skills/scripts/master-route.sh" --hint "offline apk"
+            bash "$GITHUB_WORKSPACE/skills/scripts/case-init.sh" \
+              --hint "offline apk" \
+              --case-name "caller-default" \
+              --preset offline-sample \
+              --sample "$scratch/sample.apk"
+          )
+          test -f "$caller/work/caller-default/scope.md"
+          grep -Eq '^- project_root: .*/caller-project$' "$caller/work/caller-default/scope.md"
+          grep -Eq '^- mode: offline$' "$caller/work/caller-default/scope.md"
+          grep -Eq '^- ready_for_act: true$' "$caller/work/caller-default/scope.md"
+          bash skills/scripts/case-guard.sh --case-root "$caller/work/caller-default"
+          test ! -e "$GITHUB_WORKSPACE/work/caller-default"
+
+          if bash skills/scripts/case-init.sh \
+              --hint "missing offline apk" \
+              --case-name "missing-sample" \
+              --project-root "$caller" \
+              --preset offline-sample \
+              --sample "$scratch/missing.apk"; then
+            echo "missing offline sample was accepted" >&2
+            exit 1
+          fi
+
+          # Compatibility: legacy --package-root still pins the work root.
+          bash skills/scripts/case-init.sh \
+            --hint "authorized web review" \
+            --case-name "network-default" \
+            --package-root "$scratch/project" \
+            --auth-granted \
+            --target-url "https://example.test/"
+          grep -Eq '^- mode: authorized_target_only$' "$scratch/project/work/network-default/scope.md"
+          grep -Eq '^- ready_for_act: true$' "$scratch/project/work/network-default/scope.md"
+          bash skills/scripts/case-guard.sh --case-root "$scratch/project/work/network-default"
+
           if bash skills/scripts/case-init.sh \
               --hint "offline apk" \
               --case-name "../case-escape" \
@@ -114,16 +200,6 @@ jobs:
             echo "case-init accepted an unsupported network profile" >&2
             exit 1
           fi
-
-          bash skills/scripts/case-init.sh \
-            --hint "authorized web review" \
-            --case-name "network-default" \
-            --package-root "$scratch/project" \
-            --auth-granted \
-            --target-url "https://example.test/"
-          grep -Eq '^- mode: authorized_target_only$' "$scratch/project/work/network-default/scope.md"
-          grep -Eq '^- ready_for_act: true$' "$scratch/project/work/network-default/scope.md"
-          bash skills/scripts/case-guard.sh --case-root "$scratch/project/work/network-default"
 
           bash skills/scripts/case-init.sh \
             --hint "authorized web review" \
@@ -148,6 +224,19 @@ jobs:
           FAKE_FIELDS
           if bash skills/scripts/case-guard.sh --case-root "$scratch/project/work/guard-section"; then
             echo "case-guard accepted fields outside their contract sections" >&2
+            exit 1
+          fi
+
+          # --force is compatibility-only and must not bypass the hard auth gate.
+          (
+            cd "$caller"
+            bash "$GITHUB_WORKSPACE/skills/scripts/case-init.sh" \
+              --hint "pending offline apk" \
+              --case-name "force-auth" \
+              --sample "$scratch/sample.apk"
+          )
+          if bash skills/scripts/case-guard.sh --case-root "$caller/work/force-auth" --force; then
+            echo "case-guard --force bypassed auth.status hard gate" >&2
             exit 1
           fi
 
