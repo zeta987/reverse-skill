@@ -65,6 +65,11 @@ function Test-CodexConfigRoundTrip {
             command = 'cmd'
             args = @('/c', 'echo', '中文参数')
         }
+        Set-CodexMcpServer -ServerName 'encoding-test' -ServerDefinition @{
+            type = 'stdio'
+            command = 'cmd'
+            args = @('/c', 'echo', '中文参数')
+        }
     }
     finally {
         $env:CODEX_CONFIG_PATH = $oldConfigPath
@@ -80,6 +85,7 @@ function Test-CodexConfigRoundTrip {
     }
     Assert-True ($text.Contains("[projects.'e:\codex目录\blender脚本管理器']")) "$Name preserves Chinese TOML path and closing quote"
     Assert-True ($text.Contains('[mcp_servers.encoding-test]')) "$Name adds MCP server"
+    Assert-True (([regex]::Matches($text, '(?m)^\[mcp_servers\.encoding-test\]\r?$')).Count -eq 1) "$Name updates MCP server idempotently"
     Assert-True ($text.Contains('中文参数')) "$Name preserves new Chinese values"
     if ($Newline -eq "`r`n") {
         Assert-True (-not ($text -replace "`r`n", '').Contains("`n")) "$Name preserves CRLF newlines"
@@ -88,6 +94,22 @@ function Test-CodexConfigRoundTrip {
 
 Test-CodexConfigRoundTrip -Name 'utf8-no-bom-crlf' -WithBom $false -Newline "`r`n"
 Test-CodexConfigRoundTrip -Name 'utf8-bom-lf' -WithBom $true -Newline "`n"
+
+$newPath = Join-Path $ScratchDir 'new-config.toml'
+$oldConfigPath = $env:CODEX_CONFIG_PATH
+try {
+    $env:CODEX_CONFIG_PATH = $newPath
+    Set-CodexMcpServer -ServerName 'new-config-test' -ServerDefinition @{ command = '中文命令' }
+}
+finally {
+    $env:CODEX_CONFIG_PATH = $oldConfigPath
+}
+$newBytes = [System.IO.File]::ReadAllBytes($newPath)
+$newHasBom = $newBytes.Length -ge 3 -and $newBytes[0] -eq 0xEF -and $newBytes[1] -eq 0xBB -and $newBytes[2] -eq 0xBF
+Assert-True (-not $newHasBom) 'new config uses UTF-8 without BOM'
+$newText = [System.Text.Encoding]::UTF8.GetString($newBytes)
+Assert-True ($newText.Contains('[mcp_servers.new-config-test]')) 'new config contains MCP server block'
+Assert-True ($newText.Contains('中文命令')) 'new config preserves Chinese values'
 
 $invalidPath = Join-Path $ScratchDir 'invalid-utf8.toml'
 [System.IO.File]::WriteAllBytes($invalidPath, [byte[]](0x5B, 0x80, 0x5D))
