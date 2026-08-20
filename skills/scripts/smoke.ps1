@@ -71,7 +71,8 @@ $scripts = @(
     'append-evidence.ps1',
     'case-guard.ps1',
     'test-routing.ps1',
-    'extract-summaries.ps1'
+    'extract-summaries.ps1',
+    'test-bootstrap-codex-encoding.ps1'
 )
 $parseOk = 0
 $parseFail = 0
