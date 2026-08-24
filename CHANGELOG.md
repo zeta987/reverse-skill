@@ -66,6 +66,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Create a functional Kali `proxycat` wrapper after installing the pinned source checkout
 - Scope PowerShell authorization fields to their contract sections and reject unsupported network modes in both guards
 - Reject unsupported network profiles during case initialization so invalid scopes are never emitted as ready
+- Reject unknown case presets in Bash and PowerShell before creating case artifacts, preventing mistyped presets from silently falling back to pending/offline defaults
 - Generate `skills/INDEX.md` from tracked skills only, excluding ignored local modules so clean-clone CI stays reproducible
 - Fail routing coherence when a configured skill is missing or only exists as an untracked local file
 
