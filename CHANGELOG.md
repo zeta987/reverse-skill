@@ -10,6 +10,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - **CI runs remaining unwired suites** — 	est-p0-friction.ps1 on the Windows leg of outing-tests (Windows PowerShell 5.1); case-review/tests/test_review_case.py in the Linux case-contract job. 	est-workflow-title-safety.ps1 was already wired.
 
 ### Fixed
+- **Broken internal doc link + guard** — removed a dangling `phishing-case-study.md` reference in `skills/reverse-engineering/field-notes.md` (the file was never created; the analysis is inline). Added `skills/scripts/verify-doc-links.py`, wired into the `case-contract` job, so CI fails on any internal Markdown link that does not resolve to a tracked file (fenced code, the generated `tool-index.md`, and the vendored `src-hunter` corpus are excluded).
 - **Windows PowerShell 5.1 encoding** — added a UTF-8 BOM to five non-ASCII `.ps1` scripts (`skills/scripts/verify-doc-facts.ps1`, `apk-reverse/scripts/frida-run.ps1`, `apk-reverse/scripts/rebuild-sign-install.ps1`, `ida-reverse/scripts/start.ps1`, `radare2/scripts/recon.ps1`). Without a BOM, PS 5.1 parses these files as the system ANSI codepage and garbles their Chinese / em-dash string literals; `verify-doc-facts.ps1` was failing four checks under 5.1 (CI only ran it under `pwsh`, which defaults to UTF-8). CI now guards every non-ASCII `.ps1` for a BOM.
 
 ### Changed
