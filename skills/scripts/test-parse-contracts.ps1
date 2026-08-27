@@ -67,6 +67,23 @@ foreach ($name in @($idaFiles.Keys)) {
     }
 }
 
+$now = Get-Date
+if (Test-IdaMcpKeepaliveDeadlockFromFacts -GuiOwnsPort $true -OpeningInFlight $false -LastHealthy $now.AddMinutes(-10) -Now $now) {
+    Bad 'GUI owner must not be deadlock'
+} else { Ok 'GUI owner is not deadlock' }
+if (Test-IdaMcpKeepaliveDeadlockFromFacts -GuiOwnsPort $false -OpeningInFlight $true -LastHealthy $now.AddMinutes(-10) -Now $now) {
+    Bad 'in-flight open must not be deadlock'
+} else { Ok 'in-flight open is not deadlock' }
+if (Test-IdaMcpKeepaliveDeadlockFromFacts -GuiOwnsPort $false -OpeningInFlight $false -LastHealthy $null -Now $now) {
+    Bad 'never-healthy must not Force'
+} else { Ok 'never-healthy is not deadlock' }
+if (Test-IdaMcpKeepaliveDeadlockFromFacts -GuiOwnsPort $false -OpeningInFlight $false -LastHealthy $now.AddSeconds(-10) -Now $now) {
+    Bad 'recent last-healthy must not be deadlock'
+} else { Ok 'recent last-healthy is not deadlock' }
+if (Test-IdaMcpKeepaliveDeadlockFromFacts -GuiOwnsPort $false -OpeningInFlight $false -LastHealthy $now.AddSeconds(-181) -Now $now) {
+    Ok 'stale last-healthy is deadlock'
+} else { Bad 'tools/list unhealthy >180s should be deadlock' }
+
 $recover = Get-Content -LiteralPath $idaFiles['recover.ps1'] -Raw -ErrorAction SilentlyContinue
 if ($recover -match '(?i)start\.ps1' -and $recover -match '-Force') {
     Ok 'recover.ps1 calls start.ps1 -Force'
@@ -80,10 +97,10 @@ if ($recover -match '(?im)^\s*(&\s*)?taskkill(\.exe)?\s+[^\n]*/T\b') {
 }
 
 $start = Get-Content -LiteralPath $idaFiles['start.ps1'] -Raw
-if ($start -match 'TotalSeconds\s+-ge\s+180' -and $start -match 'INFO:deadlock') {
-    Ok 'start.ps1 deadlock replace after 180s'
+if ($start -match 'Test-IdaMcpKeepaliveDeadlockFromFacts' -and $start -match 'Write-IdaMcpLastHealthy' -and $start -notmatch 'CreationDate') {
+    Ok 'start.ps1 deadlock uses last-healthy, not CreationDate'
 } else {
-    Bad 'start.ps1 missing 180s deadlock replace'
+    Bad 'start.ps1 must use last-healthy deadlock, not process CreationDate'
 }
 if ($start -match '(?im)^\s*(&\s*)?taskkill(\.exe)?\s+[^\n]*/T\b') {
     Bad 'start.ps1 must not taskkill /T'
@@ -92,10 +109,22 @@ if ($start -match '(?im)^\s*(&\s*)?taskkill(\.exe)?\s+[^\n]*/T\b') {
 }
 
 $watch = Get-Content -LiteralPath $idaFiles['watchdog.ps1'] -Raw
-if ($watch -match 'Test-DeadlockedSupervisor' -and $watch -match '-Force') {
-    Ok 'watchdog.ps1 Force-replaces deadlocked supervisor'
+if ($watch -match 'Test-IdaMcpKeepaliveDeadlockFromFacts' -and $watch -match 'Test-IdaMcpOpeningInFlight' -and $watch -match '-Force') {
+    Ok 'watchdog.ps1 Force-replaces only last-healthy deadlock'
 } else {
-    Bad 'watchdog.ps1 missing deadlock -Force path'
+    Bad 'watchdog.ps1 missing last-healthy deadlock -Force path'
+}
+if ($watch -match 'CreationDate') {
+    Bad 'watchdog.ps1 must not use process CreationDate'
+} else {
+    Ok 'watchdog.ps1 has no CreationDate deadlock'
+}
+
+$open = Get-Content -LiteralPath (Join-Path $idaDir 'open.ps1') -Raw
+if ($open -match 'Set-IdaMcpOpeningLock' -and $open -match 'Clear-IdaMcpOpeningLock') {
+    Ok 'open.ps1 holds opening.lock during idb_open'
+} else {
+    Bad 'open.ps1 must set and clear opening.lock'
 }
 
 $py = Get-Content -LiteralPath $idaFiles['run-supervisor.py'] -Raw

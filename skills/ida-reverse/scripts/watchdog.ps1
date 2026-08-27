@@ -4,8 +4,8 @@ Ensure IDA Pro MCP HTTP is healthy; start or replace it when needed.
 
 .DESCRIPTION
 One-shot health check used by the scheduled task. Safe to run every minute:
-a live server is reused; GUI / fresh idb_open busy is reused; a managed
-supervisor older than 3 minutes that cannot answer tools/list is replaced
+a live server is reused; GUI / open.ps1 in-flight / last-healthy younger
+than 3 minutes is reused; tools/list unhealthy for 3 minutes is replaced
 via start.ps1 -Force; a dead listener is started via start.ps1.
 
 Usage:
@@ -17,6 +17,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+. (Join-Path $PSScriptRoot 'IdaOpenHelpers.ps1')
 
 $logDir = Join-Path $env:LOCALAPPDATA 'reverse-skill\ida-mcp'
 if (-not (Test-Path -LiteralPath $logDir)) {
@@ -66,9 +68,8 @@ function Probe-IdaMcp {
             return @{ Status = 'stale'; Count = $count }
         }
     } catch {}
-    # Listen + RPC timeout: GUI or a fresh supervisor during idb_open = busy.
-    # A managed supervisor older than 3 minutes that cannot answer tools/list
-    # is a deadlock (Streamable HTTP GET /mcp holding single-thread HTTPServer).
+    # Listen + RPC timeout: GUI or in-flight idb_open = busy.
+    # Deadlock is consecutive tools/list failures >180s (last-healthy), not process age.
     if ($owners.Count -gt 0) {
         return @{ Status = 'busy'; Count = 0; Owners = $owners }
     }
@@ -87,37 +88,20 @@ function Test-IdaGuiProcess {
     return [string]$proc.Name -match '(?i)^(ida|ida64|idaq|idaq64)\.exe$'
 }
 
-function Test-ManagedSupervisorProcess {
-    param([int]$ProcessId)
-    $proc = Get-IdaMcpProcessInfo -ProcessId $ProcessId
-    if (-not $proc) { return $false }
-    $name = [string]$proc.Name
-    $cmd = [string]$proc.CommandLine
-    if ($name -match '(?i)^(ida|ida64|idaq|idaq64)\.exe$') { return $false }
-    if ($name -match '(?i)^(python|pythonw|cmd)\.exe$') {
-        return $cmd -match '(?i)(run-supervisor\.py|idalib_supervisor|idalib-mcp|ida-pro-mcp)'
-    }
-    return $name -match '(?i)^(idalib-mcp|ida-pro-mcp|idalib_supervisor)'
-}
-
 function Test-DeadlockedSupervisor {
-    param([int[]]$Owners, [int]$MaxAgeSeconds = 180)
+    param([int[]]$Owners)
     $gui = @($Owners | Where-Object { Test-IdaGuiProcess -ProcessId $_ })
     if ($gui.Count -gt 0) { return $false }
-    $now = Get-Date
-    $managed = @($Owners | Where-Object { Test-ManagedSupervisorProcess -ProcessId $_ })
-    if ($managed.Count -eq 0) { return $false }
-    foreach ($pid in $managed) {
-        $proc = Get-IdaMcpProcessInfo -ProcessId $pid
-        if (-not $proc -or -not $proc.CreationDate) { continue }
-        $age = ($now - $proc.CreationDate).TotalSeconds
-        if ($age -ge $MaxAgeSeconds) { return $true }
-    }
-    return $false
+    return Test-IdaMcpKeepaliveDeadlockFromFacts `
+        -GuiOwnsPort $false `
+        -OpeningInFlight (Test-IdaMcpOpeningInFlight) `
+        -LastHealthy (Read-IdaMcpLastHealthy) `
+        -Now (Get-Date)
 }
 
 $probe = Probe-IdaMcp -Port $Port
 if ($probe.Status -eq 'healthy') {
+    Write-IdaMcpLastHealthy
     Write-WatchLog "OK:$($probe.Count)`:reuse"
     exit 0
 }
