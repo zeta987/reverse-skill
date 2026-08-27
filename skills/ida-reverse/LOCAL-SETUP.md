@@ -36,7 +36,8 @@ python -m ida_pro_mcp --install --transport streamable-http --scope global
 | 脚本 | 作用 |
 |------|------|
 | `scripts/start.ps1` | 健康则 `OK:<n>:reuse`；端口在听但 RPC 超时视为忙，不杀；只在无人监听或缺 `py_eval` 时替换 managed supervisor；永不杀 `ida.exe` |
-| `scripts/watchdog.ps1` | 每分钟巡检；忙/健康则 reuse；只有 down/stale 才调 `start.ps1` |
+| `scripts/watchdog.ps1` | 每分钟巡检；健康 reuse；GUI/新开库 busy reuse；**managed supervisor 超过 3 分钟仍答不上 tools/list 则 `-Force` 拉起** |
+| `scripts/recover.ps1` | 立刻 `-Force` 重启 supervisor（不杀 `ida.exe`）。HTTP 客户端把 `idapro` 标成 error 时用这个 |
 | `scripts/install-autostart.ps1` | 注册计划任务 `reverse-skill-ida-mcp`（登录 + 每分钟） |
 | `scripts/start-gui.ps1` | idalib license 失败时开 GUI 插件 |
 | `scripts/open.ps1` | HTTP 直调 `idb_open`，绕过部分客户端 schema 校验 |

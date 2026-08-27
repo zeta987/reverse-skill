@@ -351,9 +351,23 @@ if (-not $Force) {
         exit 0
     }
     if ($probe.Status -eq 'busy') {
-        Write-Output ("WARN:busy:port={0} pid={1}" -f $Port, ($probe.Owners -join ','))
-        Write-Output 'HINT: 13337 is listening but tools/list timed out (likely idb_open). Not killing supervisor.'
-        exit 0
+        $deadlock = $false
+        $now = Get-Date
+        foreach ($ownerPid in @($probe.Owners)) {
+            if (Test-IdaGuiProcess -ProcessId $ownerPid) { continue }
+            if (-not (Test-ManagedSupervisorProcess -ProcessId $ownerPid)) { continue }
+            $proc = Get-IdaMcpProcessInfo -ProcessId $ownerPid
+            if ($proc -and $proc.CreationDate -and (($now - $proc.CreationDate).TotalSeconds -ge 180)) {
+                $deadlock = $true
+                break
+            }
+        }
+        if (-not $deadlock) {
+            Write-Output ("WARN:busy:port={0} pid={1}" -f $Port, ($probe.Owners -join ','))
+            Write-Output 'HINT: 13337 is listening but tools/list timed out (likely idb_open). Not killing supervisor.'
+            exit 0
+        }
+        Write-Output ("INFO:deadlock:port={0} pid={1} (tools/list dead >180s, replacing)" -f $Port, ($probe.Owners -join ','))
     }
 }
 
