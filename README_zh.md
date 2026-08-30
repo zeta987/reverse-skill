@@ -82,7 +82,7 @@ PRIMARY 快路径：[skills/MASTER-ROUTING.md](skills/MASTER-ROUTING.md) · 全�
 
 <div align="center">
   <a href="https://www.star-history.com/?repos=zhaoxuya520%2Freverse-skill&amp;type=date&amp;legend=top-left">
-    <img src="https://history.apivix.com/star-history.svg" alt="zhaoxuya520/reverse-skill 星标历史图" width="650" />
+    <img src="https://history.apivix.com/star-history.svg?v=hourly-v1" alt="zhaoxuya520/reverse-skill 星标历史图" width="650" />
   </a>
 </div>
 

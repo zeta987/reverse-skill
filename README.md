@@ -80,7 +80,7 @@ PRIMARY ladder: [skills/MASTER-ROUTING.md](skills/MASTER-ROUTING.md) · Full mat
 
 <div align="center">
   <a href="https://www.star-history.com/?repos=zhaoxuya520%2Freverse-skill&amp;type=date&amp;legend=top-left">
-    <img src="https://history.apivix.com/star-history.svg" alt="Star History chart for zhaoxuya520/reverse-skill" width="650" />
+    <img src="https://history.apivix.com/star-history.svg?v=hourly-v1" alt="Star History chart for zhaoxuya520/reverse-skill" width="650" />
   </a>
 </div>
 
