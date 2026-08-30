@@ -228,7 +228,6 @@ The routing core, regression suite, manifests, and case workflow do not depend o
 
 ## Sponsors
 <a id="about"></a>
-## GitAds Sponsored
 [![Sponsored by GitAds](https://gitads.dev/v1/ad-serve?source=zhaoxuya520/reverse-skill@github)](https://gitads.dev/v1/ad-track?source=zhaoxuya520/reverse-skill@github)
 <table>
   <tr>
