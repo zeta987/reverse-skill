@@ -79,7 +79,9 @@ PRIMARY ladder: [skills/MASTER-ROUTING.md](skills/MASTER-ROUTING.md) · Full mat
 <br/>
 
 <div align="center">
-  <a href="https://afterglow.watch"><img src="https://afterglow.watch/badge/zhaoxuya520/reverse-skill" alt="star velocity"></a>
+  <a href="https://www.star-history.com/?repos=zhaoxuya520%2Freverse-skill&amp;type=date&amp;legend=top-left">
+    <img src="https://history.apivix.com/star-history.svg" alt="Star History chart for zhaoxuya520/reverse-skill" width="650" />
+  </a>
 </div>
 
 <br/>
