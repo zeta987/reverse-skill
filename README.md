@@ -1,7 +1,7 @@
 <p align="center">
   <img src="reverse-skill.png" alt="reverse-skill" width="140" />
 </p>
-
+<!-- GitAds-Verify: I9ICRQWDP8AZQ1O7PMFUBJ7AO9ULV9FV -->
 <h1 align="center">reverse-skill</h1>
 <h3 align="center">Cybersecurity Skills Router · 逆向技能路由包</h3>
 
