@@ -11,6 +11,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - **Windows PowerShell 5.1 encoding** — added a UTF-8 BOM to five non-ASCII `.ps1` scripts (`skills/scripts/verify-doc-facts.ps1`, `apk-reverse/scripts/frida-run.ps1`, `apk-reverse/scripts/rebuild-sign-install.ps1`, `ida-reverse/scripts/start.ps1`, `radare2/scripts/recon.ps1`). Without a BOM, PS 5.1 parses these files as the system ANSI codepage and garbles their Chinese / em-dash string literals; `verify-doc-facts.ps1` was failing four checks under 5.1 (CI only ran it under `pwsh`, which defaults to UTF-8). CI now guards every non-ASCII `.ps1` for a BOM.
+- **Evidence-consolidation test fixed + two suites wired into CI** — `test-consolidate-evidence.ps1` printed its success marker but leaked exit 1: it ran `review_case.py --verify-hashes` on a case whose consolidation had (by design) rewritten `E-001.md`, so hash fixity could never pass. Dropped `--verify-hashes`, added an explicit exit-code assertion, and wired both it and `test-bootstrap-codex-encoding.ps1` into the Windows leg of `routing-tests` (both shipped in the repo but were never run by CI).
 
 ### Changed
 - **Coherence clamp (identity-preserving)** — `RULES.md` hot path is `master-route` → `case-init` → PRIMARY. `routing.json` remains the only route table; `MASTER-ROUTING.md` priority order is verified against JSON. `routing.md` is advisory. `precedent-auth.md` no longer grants auth.

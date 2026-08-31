@@ -59,6 +59,16 @@ jobs:
         shell: powershell
         run: ./skills/scripts/test-client-neutral-bootstrap.ps1
 
+      - name: Codex config encoding (Windows PowerShell 5.1)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./skills/scripts/test-bootstrap-codex-encoding.ps1
+
+      - name: Evidence consolidation py/ps1 parity (Windows PowerShell 5.1)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./skills/scripts/test-consolidate-evidence.ps1
+
       - name: Offline sample case contract (Windows PowerShell 5.1)
         if: runner.os == 'Windows'
         shell: powershell
