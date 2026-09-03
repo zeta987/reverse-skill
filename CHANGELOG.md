@@ -11,6 +11,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - **IDA MCP HTTP stall** — `run-supervisor.py` patches stock `idalib_supervisor` onto `ThreadingHTTPServer` and accepts Streamable HTTP GET `/mcp` (patch failure is skipped, supervisor still starts). Keep-alive deadlock is **time since last healthy `tools/list`**, not process `CreationDate`; `open.ps1` holds `opening.lock` so in-flight opens are never `-Force`d. New `recover.ps1` is an immediate `-Force` path. Never `taskkill`s `ida.exe`.
+- **Broken internal doc links + guard** — removed a dangling `phishing-case-study.md` reference and redirected the missing payloader `反弹shell.md` index entry to its tracked raw data. Added `skills/scripts/verify-doc-links.py`, wired into CI, so internal Markdown links are checked from Git index blobs even when Defender quarantines a working-tree payload file.
 - **Windows PowerShell 5.1 encoding** — added a UTF-8 BOM to five non-ASCII `.ps1` scripts (`skills/scripts/verify-doc-facts.ps1`, `apk-reverse/scripts/frida-run.ps1`, `apk-reverse/scripts/rebuild-sign-install.ps1`, `ida-reverse/scripts/start.ps1`, `radare2/scripts/recon.ps1`). Without a BOM, PS 5.1 parses these files as the system ANSI codepage and garbles their Chinese / em-dash string literals; `verify-doc-facts.ps1` was failing four checks under 5.1 (CI only ran it under `pwsh`, which defaults to UTF-8). CI now guards every non-ASCII `.ps1` for a BOM.
 
 ### Changed

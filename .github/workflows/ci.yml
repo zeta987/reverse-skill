@@ -323,6 +323,10 @@ jobs:
         shell: bash
         run: python3 skills/case-review/tests/test_review_case.py
 
+      - name: Internal Markdown links resolve
+        shell: bash
+        run: python3 skills/scripts/verify-doc-links.py
+
   version-check:
     name: version consistency
     runs-on: ubuntu-latest
