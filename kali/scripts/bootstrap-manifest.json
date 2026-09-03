@@ -107,6 +107,15 @@
       "kaliNote": "JEB Pro Linux edition requires a user-provided license and manual installation."
     },
     {
+      "name": "binaryninja",
+      "bootstrapKind": "manual",
+      "docsUrl": "https://binary.ninja/",
+      "canAutoInstall": false,
+      "verifyCommand": "binaryninja",
+      "manualInstallHint": "Binary Ninja is commercial software. Obtain a valid Vector 35 license and install it manually. Optional community MCP plugins require supply-chain review and loopback binding.",
+      "kaliNote": "Binary Ninja Linux requires a user-provided license and manual installation."
+    },
+    {
       "name": "reqable-mcp",
       "bootstrapKind": "npm-mcp",
       "npmPackage": "reqable-mcp-server@1.0.1",

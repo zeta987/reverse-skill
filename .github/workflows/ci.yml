@@ -129,6 +129,7 @@ jobs:
           Get-Content kali/scripts/bootstrap-manifest.json -Raw -Encoding UTF8 | ConvertFrom-Json | Out-Null
           Get-Content skills/config/routing.json -Raw -Encoding UTF8 | ConvertFrom-Json | Out-Null
           Get-Content skills/tests/routing-benchmark.json -Raw -Encoding UTF8 | ConvertFrom-Json | Out-Null
+          Get-Content plugins/reverse-skill/.codex-plugin/plugin.json -Raw -Encoding UTF8 | ConvertFrom-Json | Out-Null
           Write-Host "All JSON valid"
 
       - name: Doc fact tables vs manifest (verify-doc-facts)
@@ -336,6 +337,17 @@ jobs:
       - name: Internal Markdown links resolve
         shell: bash
         run: python3 skills/scripts/verify-doc-links.py
+
+      - name: Repository executable/reference boundaries
+        shell: bash
+        run: python3 skills/scripts/verify-repository-security.py
+
+  gradle-wrapper-validation:
+    name: Gradle wrapper validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
   version-check:
     name: version consistency
