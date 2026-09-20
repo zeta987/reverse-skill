@@ -57,9 +57,12 @@ analyzeHeadless /path/to/project Proj -import sample.bin -postScript ExportDecom
 ### 4. MCP（若已配置）
 
 ```text
-□ 确认 ghidra MCP 端口（常见 8765，以 tool-index 为准）
+□ 确认实际外掛与 bridge：LaurieWired GhidraMCP 与 GhydraMCP 不是同一接入方式；后者从 8192 起发现实例，勿套用 IDA 的 13337
 □ 用 MCP 工具拉反编译 / xrefs，禁止猜端口
 ```
+
+Windows Codex / 本机 dsh web 的配置、后端启动与验收见
+[`docs/mcp/README.md`](../../docs/mcp/README.md)。stdio bridge 启动不等于 CodeBrowser 外掛已运行。
 
 ## 工具链
 
