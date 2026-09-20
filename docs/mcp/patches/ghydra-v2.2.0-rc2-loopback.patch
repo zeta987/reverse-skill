@@ -1,0 +1,13 @@
+diff --git a/src/main/java/eu/starsong/ghidra/GhydraMCPPlugin.java b/src/main/java/eu/starsong/ghidra/GhydraMCPPlugin.java
+index aa2fb2b..23303f5 100644
+--- a/src/main/java/eu/starsong/ghidra/GhydraMCPPlugin.java
++++ b/src/main/java/eu/starsong/ghidra/GhydraMCPPlugin.java
+@@ -51,0 +52 @@ public class GhydraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
++    private static final String LOOPBACK_HOST = "127.0.0.1";
+@@ -92 +93 @@ public class GhydraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
+-        server = HttpServer.create(new InetSocketAddress(port), 0);
++        server = HttpServer.create(new InetSocketAddress(LOOPBACK_HOST, port), 0);
+@@ -437 +438,2 @@ public class GhydraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
+-                try (ServerSocket s = new ServerSocket(candidate)) {
++                try (ServerSocket s = new ServerSocket()) {
++                    s.bind(new InetSocketAddress(LOOPBACK_HOST, candidate));
