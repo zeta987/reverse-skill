@@ -70,7 +70,7 @@ entries with the repository's
 
 ```text
 Ghidra args: <repo>/skills/scripts/mcp/legacy-mcp-stdio.py --script <repo>/skills/scripts/mcp/ghydra-stdio.py -- --bridge <installed-bridge.py>
-x64dbg args: <repo>/skills/scripts/mcp/legacy-mcp-stdio.py --script <installed-x64dbg.py> -- serve
+x64dbg args: <repo>/skills/scripts/mcp/legacy-mcp-stdio.py --script <repo>/skills/scripts/mcp/x64dbg-stdio.py -- --bridge <installed-x64dbg.py>
 ```
 
 Retain the existing Python command, working directories and environment values.
@@ -135,6 +135,21 @@ repo `.dsh/cordis.patch.yml` when its session cwd changes. Selecting Reverse Ski
 from another workspace still enables its MCPs. A bridge's `cwd` cannot limit
 tool visibility. Sessions using the same preset share its standing scope and
 MCP connections, so coordinate shared debugger/database state.
+
+Preset discovery itself does not start MCPs, but selecting a preset is not the
+only activation path. A cold session's skills catalog can call
+`standingKeyFor()` and mount its recorded preset while the UI prewarms input
+sources. Mounting starts all MCP entries in that preset and awaits their initial
+connection and tool discovery. Once mounted, its plugins survive individual
+agent disposal until the Host is stopped. Switching projects does not unload
+them. Tool visibility isolation therefore does not imply process isolation.
+
+This version has no MCP `lazy`/`defer`/activation option or separate startup
+timeout. `toolCallTimeoutMs` affects tool calls, not initialization or
+`tools/list`; disabling reconnect does not prevent the first spawn. A blocked
+preset mount can delay the API request awaiting it, but ordinary
+`ListToolsRequest` logs alone do not establish the cause of a frozen Web UI.
+Inspect frontend errors and the actual triggering request separately.
 
 ## Verification and reload
 
