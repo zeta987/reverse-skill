@@ -37,6 +37,28 @@ for IDA, Ghidra, x64dbg, and math. Local entry IDs are `mcp-ida-pro`,
 `mcp-ghidra`, `mcp-x64dbg`, and `mcp-math`; namespaces are `ida-pro`, `ghidra`,
 `x64dbg`, and `math`. Tools are named `mcp__<serverName>__<toolName>`.
 
+For x64dbg, use the repo's `x64dbg-stdio.py --bridge <installed-x64dbg.py>`
+launcher instead of directly running `x64dbg.py serve`. Both Python launchers
+require the adjacent `bridge_compat.py`. Updating/copying only a preset does not
+copy these script dependencies. After a launcher or preset changes, reconnect
+the affected MCPs or start a fresh Web process when its sessions are idle;
+an already running bridge keeps its previously loaded Python code.
+
+If this installation also needs `legacy-mcp-stdio.py` for `server/discover`, keep
+it as the outer launcher. Point its `--script` to `x64dbg-stdio.py` and forward
+`--bridge` to that inner launcher, instead of forwarding `serve` to the raw
+x64dbg bridge. For example, its argument list becomes:
+
+```yaml
+args:
+  - '<repo>/skills/scripts/mcp/legacy-mcp-stdio.py'
+  - --script
+  - '<repo>/skills/scripts/mcp/x64dbg-stdio.py'
+  - --
+  - --bridge
+  - '<installed-x64dbg.py>'
+```
+
 ### MCP 1.6 bridge discovery compatibility
 
 DSH's MCP SDK 2 client uses automatic version negotiation, starting with
