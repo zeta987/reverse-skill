@@ -2,17 +2,26 @@
 
 本页是通用步骤，不含某台机器的绝对路径。本机就绪报告留在仓库根目录的 `LOCAL-READINESS.md`（已 gitignore）。
 
+## 先确认安装版本与客户端
+
+Windows Codex / 本机 dsh web 先读 [MCP 客户端与后端指南](../../docs/mcp/README.md)。
+本页后续的 `idb_open` / `idalib_supervisor` 示例适用于提供这些 API 的版本。
+旧版安装可能只有 `idalib_open` / `idalib_list` 与 `ida_pro_mcp.idalib_server`；
+先检查实际模块与 `tools/list`，不得直接套用不匹配的 `open.ps1`。
+`start-local-backend.ps1 -Backend Ida` 可按已解析的 Python / IDA 路径启动或复用该旧版 headless 后端。
+IDA GUI 插件的 `init()` 也可能仅登记热键，须确认调用插件后服务真的监听，不能从“插件存在”推定自动启动。
+
 ## 目标形态
 
 | 项 | 约定 |
 |----|------|
 | IDA 安装目录 | 环境变量 `IDADIR`（目录内有 `ida.exe` 或 `ida.dll`） |
 | HTTP MCP | `http://127.0.0.1:13337/mcp` |
-| 客户端服务器名 | 只留 **`idapro`**（不要同时注册 `ida-pro-mcp`） |
+| 客户端服务器名 | 沿用客户端选定的单一名称（例如 `idapro` 或 `ida-pro-mcp`），避免重复登记同一后端 |
 | 启动 | `scripts/start.ps1`（`--unsafe`，无 `?ext=dbg`） |
 | 开库 | 大文件优先 `scripts/open.ps1`，不要经部分客户端直调 `idb_open` |
 
-两个 MCP 名字指向同一 13337 会把工具注册两遍，并和 idalib worker 抢端口。
+两个 MCP 名字指向同一后端会重复登记工具。是否争用端口取决于是否启动了多个后端进程；服务器名称本身不占用端口。
 
 ## 安装
 
@@ -54,7 +63,8 @@ GUI 占用 13337 但一时没回包时，`start.ps1` 输出 `WARN:gui_busy` 并�
 
 ## 客户端
 
-全部指向 Streamable HTTP：`http://127.0.0.1:13337/mcp`，服务器名 `idapro`。
+直接 HTTP 模式指向 `http://127.0.0.1:13337/mcp`；stdio 模式启动安装版
+`server.py --ida-rpc http://127.0.0.1:13337`。后者只是代理，不会自动启动 IDA 后端。
 
 改配置后必须新开会话。Cursor 在启动时若端口未监听，事后把服务拉起来也**不会自动重连**，需要在 MCP 面板手动刷新。
 

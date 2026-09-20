@@ -26,7 +26,7 @@ description: |
    - 部分代码 AI 客户端 的 MCP 客户端对 open 类工具的 output schema 校验有 BUG
    - 报错：`Structured content does not match the tool's output schema`
    - **解决办法**：使用 `scripts/open.ps1` 脚本通过 HTTP API 直调，绕过 MCP 校验层
-   - 当前 ida-pro-mcp 2.x 工具名为 `idb_open` / `idb_list` / `idb_save`（不再是 `idalib_*`）
+   - 工具名随安装版本变化：部分版本提供 `idb_open` / `idb_list` / `idb_save`，旧版提供 `idalib_open` / `idalib_list`；先以实际 `tools/list` 确认
    - 文件打开后返回 `session_id`（database），后续工具调用需带该 session
 
 2. **`C:\Windows\System32\` 文件无权限打开**
@@ -38,9 +38,9 @@ description: |
    - **解决办法**：使用 `scripts/start.ps1`（`-WindowStyle Hidden` 后台静默启动）
    - 脚本会等待服务就绪后自动退出，不阻塞对话
 
-4. **MCP 服务器名不能用横线**
-   - 之前用 `ida-pro-mcp` 作为服务器名，可能引起工具注册问题
-   - **当前配置**：服务器名 `idapro`，工具前缀 `idapro_*`
+4. **MCP 服务器名与工具前缀由客户端决定**
+   - Codex 可使用 `ida-pro-mcp`；DSH 根据 `serverName` 生成 `mcp__<serverName>__<toolName>`。以客户端实际工具清单为准
+   - 同一客户端尽量只登记一个指向该后端的名称，避免工具重复；连字符本身不表示配置错误
 
 5. **Remote HTTP vs Local Stdio**
    - `type:"local"`（stdio）模式：`idalib_open` 同样有 schema 校验问题
@@ -50,7 +50,7 @@ description: |
 6. **PR #389 修复了部分 schema 问题**
    - 作者 mrexodia 在 issue #388 后通过 PR #389 合并了修复
    - 修复了 HTTP 模式下的 structuredContent schema，但 部分代码 AI 客户端 侧校验仍有问题
-   - 已安装最新 `main` 分支版本
+   - 本机安装版本与源代码提交必须实际核对，本文不表示机器已安装最新 `main`
 
 7. **idalib 超时留下孤儿 worker 进程锁文件**
    - 第一次 `open.ps1` 超时后，idalib 的 python worker 子进程可能变成孤儿，咬着 `.id0`/`.id1`/`.nam` 不放
