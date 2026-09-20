@@ -24,7 +24,8 @@ Resolve each path from the current installation. The same backend should have
 one chosen alias per client; avoid registering both `idapro` and `ida-pro-mcp`
 against the same backend unless duplicate tools are intentional.
 
-Keep the Ghydra and x64dbg launchers beside `bridge_compat.py`. An older config
+Keep the Ghydra and x64dbg launchers beside `bridge_compat.py` and
+`stdio_shutdown.py`. An older config
 that runs `x64dbg.py serve` directly bypasses the settings and register-parameter
 compatibility fixes; update only that server's args to use the repo launcher.
 

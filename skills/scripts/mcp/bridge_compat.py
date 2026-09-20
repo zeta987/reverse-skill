@@ -9,6 +9,7 @@ from typing import Annotated
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import Settings
 from pydantic import Field
+from stdio_shutdown import install_eof_shutdown
 
 REGISTER_TYPE = '_reverse_mcp_register_arg'
 
@@ -87,6 +88,7 @@ def run_bridge(path, adapter, arguments=(), redirect_print=False):
     ast.fix_missing_locations(tree)
     # Resolve forward references before BaseSettings sources inspect FieldInfo.
     Settings.model_rebuild(_types_namespace={'FastMCP': FastMCP})
+    install_eof_shutdown()
     module = ModuleType('__main__')
     module.__dict__.update({
         '__file__': str(bridge), '__package__': '', '__spec__': None,

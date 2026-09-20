@@ -10,6 +10,7 @@ import sys
 
 import anyio
 import mcp.types as types
+from stdio_shutdown import install_eof_shutdown, run_cli
 
 
 @asynccontextmanager
@@ -49,6 +50,7 @@ def install_compatibility():
         raise RuntimeError(
             f"This compatibility entry requires the verified mcp==1.6.0 environment; got {installed_version}"
         )
+    install_eof_shutdown()
     stdio = importlib.import_module("mcp.server.stdio")
     fastmcp = importlib.import_module("mcp.server.fastmcp.server")
     original_transport = stdio.stdio_server
@@ -75,4 +77,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_cli(main)

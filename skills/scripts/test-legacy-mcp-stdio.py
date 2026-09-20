@@ -2,12 +2,14 @@
 from contextlib import asynccontextmanager
 import importlib.util
 from pathlib import Path
+import sys
 import unittest
 
 import anyio
 import mcp.types as types
 
 SCRIPT = Path(__file__).parent / "mcp" / "legacy-mcp-stdio.py"
+sys.path.insert(0, str(SCRIPT.parent))
 spec = importlib.util.spec_from_file_location("legacy_mcp_stdio", SCRIPT)
 compat = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(compat)

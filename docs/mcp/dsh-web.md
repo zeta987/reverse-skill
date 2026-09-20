@@ -38,8 +38,8 @@ for IDA, Ghidra, x64dbg, and math. Local entry IDs are `mcp-ida-pro`,
 `x64dbg`, and `math`. Tools are named `mcp__<serverName>__<toolName>`.
 
 For x64dbg, use the repo's `x64dbg-stdio.py --bridge <installed-x64dbg.py>`
-launcher instead of directly running `x64dbg.py serve`. Both Python launchers
-require the adjacent `bridge_compat.py`. Updating/copying only a preset does not
+launcher instead of directly running `x64dbg.py serve`. Keep the adjacent
+`bridge_compat.py` and `stdio_shutdown.py` with the launchers. Updating/copying only a preset does not
 copy these script dependencies. After a launcher or preset changes, reconnect
 the affected MCPs or start a fresh Web process when its sessions are idle;
 an already running bridge keeps its previously loaded Python code.
