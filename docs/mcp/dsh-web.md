@@ -37,6 +37,32 @@ for IDA, Ghidra, x64dbg, and math. Local entry IDs are `mcp-ida-pro`,
 `mcp-ghidra`, `mcp-x64dbg`, and `mcp-math`; namespaces are `ida-pro`, `ghidra`,
 `x64dbg`, and `math`. Tools are named `mcp__<serverName>__<toolName>`.
 
+### MCP 1.6 bridge discovery compatibility
+
+DSH's MCP SDK 2 client uses automatic version negotiation, starting with
+`server/discover`. The tested Python `mcp==1.6.0` bridges do not answer that
+request, so a successful legacy `initialize` test alone does not establish
+DSH readiness. Keep the verified Python dependencies and wrap these two DSH
+entries with the repository's
+[`legacy-mcp-stdio.py`](../../skills/scripts/mcp/legacy-mcp-stdio.py):
+
+```text
+Ghidra args: <repo>/skills/scripts/mcp/legacy-mcp-stdio.py --script <repo>/skills/scripts/mcp/ghydra-stdio.py -- --bridge <installed-bridge.py>
+x64dbg args: <repo>/skills/scripts/mcp/legacy-mcp-stdio.py --script <installed-x64dbg.py> -- serve
+```
+
+Retain the existing Python command, working directories and environment values.
+This process-local transport adapter replies `-32601` (Method not found) to
+`server/discover`, allowing the client to negotiate the legacy protocol. Every
+other request, notification and response passes unchanged. It neither redirects
+`sys.stdout` nor edits the installed SDK. The inner Ghidra wrapper still keeps
+module diagnostics on stderr. This adapter checks for the tested `mcp==1.6.0`
+version; reassess it before changing dependencies.
+
+Run `skills/scripts/test-legacy-mcp-stdio.py` with that Python environment, then
+repeat the actual DSH runtime test below. These additional arguments belong in
+the affected preset, not in the global Web composition.
+
 `preset.yml` supplies the Web display metadata:
 
 ```yaml
