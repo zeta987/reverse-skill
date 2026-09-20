@@ -17,6 +17,7 @@
 - 後端啟動須按 backend／port 序列化，核對真實 listener PID 與子程序關係；只看健康 API 可能誤報競爭啟動的 PID。
 - 同版本 bridge 的工具清單成功不代表每個工具定義正確。Ghydra 原始碼重複註冊 analysis_run，MCP 1.6.0 保留第一個舊端點版本；repo 啟動器只對已核對的兩份定義移除舊版，保留 background／port 與 /analysis/run。未知形狀停止自動適配。
 - MCP 1.6.0 搭配 Pydantic 2.13.5／settings 2.15.0 的 lifespan 警告可在首次建構前 model_rebuild 修正；x64dbg 的 register 欄位以內部別名搭配 Field(alias='register') 保留公開 schema 與 HTTP 鍵。修正在記憶體內套用，未修改安裝檔或全域隱藏警告。
+- Ctrl+C 的 WouldBlock／CancelledError／KeyboardInterrupt 鏈可來自正常中斷。CLI 邊界僅捕捉 KeyboardInterrupt，完成原有清理後回傳 130；一般例外保留。另針對 MCP 1.6.0 的 EOF 等待，於接收迴圈結束時同步關閉 incoming sender，讓伺服器能進入 context 清理；適配限定版本且冪等。
 
 ## 證據與驗證
 
@@ -26,6 +27,7 @@ DSH 移入 preset 後，正式檔完整 discovery 通過；抽取四個實際 MC
 
 後續 warning 修正先以真實 stdio fixture 重現三項失敗，再確認修正後三項通過；涵蓋分析參數與端點、register 公開欄位與必填驗證，以及保留非相關警告。搬移時需同步整個 mcp 腳本目錄與客戶端 launcher 引用。
 另驗證與 legacy discovery wrapper 組合後，四項 stdio 測試及原有 legacy 測試均通過；實際 DSH 載入 Ghidra 40／x64dbg 34 工具，對惰性 HTTP 服務呼叫 RegisterGet／RegisterSet 的欄位正確，三項目標警告均未出現。
+關閉測試涵蓋五種啟動組合的 SIGINT、EOF 與真實錯誤，共 15 個子情境；修正前重現 traceback 與 EOF 逾時，修正後全部通過。訊號僅在隔離的測試子程序內產生。
 
 完整 E-codex／E-dsh-core／E-dsh-ghidra／E-web-ui 證據保留在使用者的本機 case；本條目不保存私有配置、樣本內容、憑據或個人路径。呼叫路徑為 client → stdio bridge → loopback backend → 靜態分析結果。
 

@@ -136,7 +136,7 @@ verify the raw backend response as well.
 Launch that x64dbg bridge through
 [`x64dbg-stdio.py`](../../skills/scripts/mcp/x64dbg-stdio.py), passing
 `--bridge <installed-x64dbg.py>`. The launcher adds the bridge's `serve` argument.
-Both Python launchers use the adjacent `bridge_compat.py`; copy/update the whole
+The launchers use the adjacent `bridge_compat.py` and `stdio_shutdown.py`; copy/update the whole
 `skills/scripts/mcp/` directory when moving the setup to another machine.
 
 With the tested MCP 1.6.0 / Pydantic 2.13.5 / pydantic-settings 2.15.0 combination,
@@ -152,6 +152,20 @@ It checks actual MCP stdio initialization, tool schemas and calls against inert
 fixtures, including both `background` values and missing register arguments.
 The math startup banner and SDK `ListToolsRequest` messages are ordinary stderr
 logs and are not disabled by these adapters.
+
+On Ctrl+C, the launchers let the asynchronous stack unwind, then translate only
+`KeyboardInterrupt` into exit status 130 without a traceback. Other exceptions
+remain visible. For the tested MCP 1.6.0 SDK, the process-local shutdown adapter
+also closes the server's incoming message sender when its transport receive
+loop ends; otherwise EOF can leave the server waiting for a stream that would
+only close during later context cleanup. This version-gated adaptation is
+idempotent when a legacy outer launcher wraps an inner launcher.
+
+`test-mcp-shutdown.py` uses isolated child processes to verify SIGINT, EOF, and
+real errors across the direct and legacy launcher combinations. It raises the
+signal only inside the test child; it does not send Ctrl+C to a live Host or
+debugger. Updating these scripts takes effect on the next bridge launch and
+does not require another change to an already-correct command/args setting.
 
 The math server accepts JavaScript `number` values. For exact 64-bit addresses,
 use Python integer arithmetic or a verified address-conversion tool rather than
