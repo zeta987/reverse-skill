@@ -15,12 +15,17 @@
 - 此 repo 的四個 Codex MCP 應放在 `.codex/config.toml`，不放使用者全域設定。驗證必須比較 repo 內外清單，並讓 Codex 正常讀取專案設定；命令列注入四項設定不能證明專案範圍正確。
 - DSH Web 插件清單是面板開啟時的快照；初次的「載入中」需重開面板才能反映後續完成狀態。
 - 後端啟動須按 backend／port 序列化，核對真實 listener PID 與子程序關係；只看健康 API 可能誤報競爭啟動的 PID。
+- 同版本 bridge 的工具清單成功不代表每個工具定義正確。Ghydra 原始碼重複註冊 analysis_run，MCP 1.6.0 保留第一個舊端點版本；repo 啟動器只對已核對的兩份定義移除舊版，保留 background／port 與 /analysis/run。未知形狀停止自動適配。
+- MCP 1.6.0 搭配 Pydantic 2.13.5／settings 2.15.0 的 lifespan 警告可在首次建構前 model_rebuild 修正；x64dbg 的 register 欄位以內部別名搭配 Field(alias='register') 保留公開 schema 與 HTTP 鍵。修正在記憶體內套用，未修改安裝檔或全域隱藏警告。
 
 ## 證據與驗證
 
 兩個客戶端分別載入 IDA 42、Ghidra 40、x64dbg 34、math 22 個工具。IDA／Ghidra 靜態函式與反編譯、x64dbg 原始 HTTP 與 MCP 空會話狀態、math 加法均成功。Codex 測試沒有建立任務；DSH harness 未載入模型。175 筆路由與 smoke 通過；新增的惰性假後端測試驗證並行與早退行為。
 
 DSH 移入 preset 後，正式檔完整 discovery 通過；抽取四個實際 MCP rows 經原生 AgentPresets.mount，selected scope 有 138 工具，sibling／root 為 0，math 呼叫成功且 sibling 呼叫被拒絕。Web 確認四項僅列在自訂 preset，Standard 與全域清單沒有這四項。這項測試未建立模型會話，也未重新啟動 Ghidra／x64dbg 後端。
+
+後續 warning 修正先以真實 stdio fixture 重現三項失敗，再確認修正後三項通過；涵蓋分析參數與端點、register 公開欄位與必填驗證，以及保留非相關警告。搬移時需同步整個 mcp 腳本目錄與客戶端 launcher 引用。
+另驗證與 legacy discovery wrapper 組合後，四項 stdio 測試及原有 legacy 測試均通過；實際 DSH 載入 Ghidra 40／x64dbg 34 工具，對惰性 HTTP 服務呼叫 RegisterGet／RegisterSet 的欄位正確，三項目標警告均未出現。
 
 完整 E-codex／E-dsh-core／E-dsh-ghidra／E-web-ui 證據保留在使用者的本機 case；本條目不保存私有配置、樣本內容、憑據或個人路径。呼叫路徑為 client → stdio bridge → loopback backend → 靜態分析結果。
 

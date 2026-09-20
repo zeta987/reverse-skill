@@ -118,7 +118,11 @@ before applying it with `git apply --unidiff-zero` and the patch file path.
 Use [`ghydra-stdio.py`](../../skills/scripts/mcp/ghydra-stdio.py) with
 `--bridge <installed-bridge.py>` when this release prints diagnostics to stdout.
 It redirects only that module's `print` calls to stderr, leaving MCP frames on
-stdout. It starts the bridge only and does not select or execute a sample.
+stdout. It also removes the tested bridge's obsolete duplicate `analysis_run`
+definition: the retained tool accepts `background` and `port` and calls
+`/analysis/run`, matching the plugin endpoint. Unknown duplicate signatures or
+endpoints stop startup for inspection instead of silently choosing a tool.
+It starts the bridge only and does not select or execute a sample.
 
 The supplied x64dbg bridge imports `mcp.server.fastmcp.FastMCP`. An unpinned
 `uv --with mcp` resolved to an incompatible 2.x environment during testing.
@@ -128,6 +132,26 @@ environment is preferable to embedding an evictable uv cache path in a client
 config. `X64DBG_URL` must end in `/` because this bridge concatenates endpoint
 names directly. Its `IsDebugging()` can hide connection failures as `false`;
 verify the raw backend response as well.
+
+Launch that x64dbg bridge through
+[`x64dbg-stdio.py`](../../skills/scripts/mcp/x64dbg-stdio.py), passing
+`--bridge <installed-x64dbg.py>`. The launcher adds the bridge's `serve` argument.
+Both Python launchers use the adjacent `bridge_compat.py`; copy/update the whole
+`skills/scripts/mcp/` directory when moving the setup to another machine.
+
+With the tested MCP 1.6.0 / Pydantic 2.13.5 / pydantic-settings 2.15.0 combination,
+the compatibility module rebuilds FastMCP settings before their first use,
+resolving the `lifespan` forward reference. The x64dbg adapter uses an internal
+parameter alias for `RegisterGet` and `RegisterSet`, retaining the public MCP
+argument and HTTP key `register`. This removes the model-attribute collision
+without changing callers. Adaptations happen in memory; installed bridge files
+and dependencies are unchanged, and unrelated warnings remain visible.
+
+Run `skills/scripts/test-mcp-bridge-compat.py` with the tested bridge Python.
+It checks actual MCP stdio initialization, tool schemas and calls against inert
+fixtures, including both `background` values and missing register arguments.
+The math startup banner and SDK `ListToolsRequest` messages are ordinary stderr
+logs and are not disabled by these adapters.
 
 The math server accepts JavaScript `number` values. For exact 64-bit addresses,
 use Python integer arithmetic or a verified address-conversion tool rather than
