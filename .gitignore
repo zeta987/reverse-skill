@@ -27,6 +27,10 @@ implementation-notes.md
 
 # User-specific config
 .claude/
+# Local Codex MCP paths are machine-specific; the adapter is optional.
+.codex/config.toml
+# Repo-owned DSH presets contain this machine's MCP executable paths.
+.dsh/agent-presets/
 # Local Issue/PR review exports; do not commit GitHub discussion snapshots.
 issues.json
 issues-index.txt
