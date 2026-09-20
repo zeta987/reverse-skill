@@ -357,6 +357,11 @@ frida-ps -U
 
 ## Integration with AI Clients
 
+For local Windows Codex or `dsh web` MCP configuration, backend startup, and
+actual call verification, read [Windows MCP clients](docs/mcp/README.md).
+Client initialization, backend availability, and successful tool calls are
+separate checks. Use the installed bridge's actual API and port convention.
+
 ### General Integration Principles
 
 Whether you use Claude Code, Codex CLI, Cursor, Cline, Windsurf, or another code AI client, what you actually need to integrate are these four things:
