@@ -54,6 +54,7 @@ declare -a TOOL_CATALOG=(
     "nikto|pentest-tools|Web 漏洞扫描|-Version|nikto"
     "binwalk|reverse-engineering|固件分析与提取|--help|binwalk"
     "bkcrack|reverse-engineering|CTF ZIP/PKZIP ZipCrypto 已知明文攻击|--version|bkcrack"
+    "yara|malware-analysis|恶意软件规则匹配引擎|--version|yara"
     "gdb|reverse-engineering|调试器|--version|gdb"
     "objdump|reverse-engineering|反汇编|--version|objdump"
     "strings|reverse-engineering|字符串提取|--version|strings"
