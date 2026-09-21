@@ -10,6 +10,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - **CI runs remaining unwired suites** — `test-p0-friction.ps1` on the Windows leg of `routing-tests` (Windows PowerShell 5.1); `case-review/tests/test_review_case.py` in the Linux `case-contract` job. `test-workflow-title-safety.ps1` was already wired.
 - **Binary Ninja route and skill** — added `binary-ninja-reverse` for HLIL/MLIL/LLIL, Python API, and an explicitly enabled loopback community MCP bridge; Binary Ninja remains a manual commercial dependency.
 - **Optional Codex adapter plugin** — added `plugins/reverse-skill/` without changing the client-neutral core or auto-registering MCP servers.
+- **Benchmark coverage for R40 (case-evidence-review)** — the route had a single English case; added three cases covering its previously-untested branches (Chinese `证据链`/`证据图`/`可追溯性`/`案件审查`/`案例审计`, and English `evidence.?graph`/`fixity.?check`/`case.?audit`), each verified through both the PowerShell and Bash routers.
 
 ### Fixed
 - **macOS BSD sed in bash workflow tests** — `test-bash-workflow.sh` used GNU-only `sed -i 's/…/…/'`. BSD `sed` (macOS) treats the expression as a backup suffix and aborts with `invalid command code`, so Test 4/5 (case-guard reject paths) never ran on macOS. Replaced with a portable `mktemp` + `sed` + `mv` helper and wired `test-bash-workflow.sh` into `macos-bash-compat.yml` so the reject-path contract is covered on macOS CI (closes #135).
