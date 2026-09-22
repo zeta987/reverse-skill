@@ -13,10 +13,11 @@ trap 'rm -rf -- "$SCRATCH"' EXIT
 
 BIN_DIR="$SCRATCH/bin"
 HOME_DIR="$SCRATCH/home"
+WORK_DIR="$SCRATCH/workdir"
 FIXTURE_SCRIPTS="$SCRATCH/fixture/kali/scripts"
 OUTPUT_MD="$SCRATCH/tool-index.md"
 OUTPUT_JSON="$SCRATCH/tool-index.json"
-mkdir -p "$BIN_DIR" "$HOME_DIR" "$FIXTURE_SCRIPTS/lib"
+mkdir -p "$BIN_DIR" "$HOME_DIR" "$WORK_DIR" "$FIXTURE_SCRIPTS/lib"
 
 # Exercise temporary copies of the production refresh path and discovery
 # catalog. Disable the port probe and quarantine literal absolute fallback
@@ -219,9 +220,14 @@ STUB
 chmod +x "$BIN_DIR/pwn"
 
 # Always pass temporary output paths and a temporary HOME: this must not write
-# generated indexes into the repository or inspect client-global config.
-env PATH="$BIN_DIR" HOME="$HOME_DIR" \
-    "$REAL_BASH" "$REFRESH" "$OUTPUT_MD" "$OUTPUT_JSON" >/dev/null
+# generated indexes into the repository or inspect client-global config. Run
+# from an empty temporary directory so relative fallback globs cannot discover
+# or execute an untracked repository-root command.
+(
+    cd "$WORK_DIR"
+    env PATH="$BIN_DIR" HOME="$HOME_DIR" \
+        "$REAL_BASH" "$REFRESH" "$OUTPUT_MD" "$OUTPUT_JSON" >/dev/null
+)
 
 "$REAL_PYTHON" - \
     "$OUTPUT_MD" \
@@ -410,7 +416,10 @@ if errors:
     raise SystemExit("pwntools discovery validation failed:\n- " + "\n- ".join(errors))
 PY
 
-list_output="$(env PATH="$BIN_DIR" HOME="$HOME_DIR" "$REAL_BASH" "$BOOTSTRAP" --list)"
+list_output="$(
+    cd "$WORK_DIR"
+    env PATH="$BIN_DIR" HOME="$HOME_DIR" "$REAL_BASH" "$BOOTSTRAP" --list
+)"
 "$REAL_PYTHON" - "$list_output" <<'PY'
 import sys
 
@@ -419,50 +428,83 @@ if "pwntools" not in tokens:
     raise SystemExit("bootstrap --list must include the complete token 'pwntools'")
 PY
 
+HELP_VALIDATOR="$SCRATCH/validate-bootstrap-help.py"
+cat > "$HELP_VALIDATOR" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+
+if len(sys.argv) != 2:
+    raise SystemExit("usage: validate-bootstrap-help.py HELP_OUTPUT")
+
+lines = Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
+section_pattern = re.compile(r"^\s*\[([^]]+)\]\s*$")
+matching_section_titles = []
+
+section_starts = [
+    (index, heading.group(1))
+    for index, line in enumerate(lines)
+    if (heading := section_pattern.fullmatch(line)) is not None
+]
+for section_number, (section_start, title) in enumerate(section_starts):
+    if section_number + 1 < len(section_starts):
+        section_end = section_starts[section_number + 1][0]
+    else:
+        section_end = len(lines)
+    section_lines = lines[section_start + 1 : section_end]
+    if any("pwntools" in line.split() for line in section_lines):
+        matching_section_titles.append(title)
+
+expected_section_titles = ["逆向分析"]
+if matching_section_titles != expected_section_titles:
+    raise SystemExit(
+        "bootstrap human help must classify the complete token 'pwntools' "
+        "once and only once under [逆向分析]; "
+        f"matching section titles: {matching_section_titles!r}"
+    )
+PY
+
 set +e
-help_output="$(env PATH="$BIN_DIR" HOME="$HOME_DIR" "$REAL_BASH" "$BOOTSTRAP" 2>&1)"
+(
+    cd "$WORK_DIR"
+    env PATH="$BIN_DIR" HOME="$HOME_DIR" "$REAL_BASH" "$BOOTSTRAP"
+) > "$SCRATCH/bootstrap-help.txt" 2>&1
 help_status=$?
 set -e
 if [[ $help_status -eq 0 ]]; then
     echo "bootstrap without arguments must exit non-zero" >&2
     exit 1
 fi
-"$REAL_PYTHON" - "$help_output" <<'PY'
-import re
-import sys
+"$REAL_PYTHON" "$HELP_VALIDATOR" "$SCRATCH/bootstrap-help.txt"
 
-lines = sys.argv[1].splitlines()
-section_pattern = re.compile(r"^\s*\[([^]]+)\]\s*$")
-allowed_section_title = "逆向分析"
-allowed_sections = []
+# Mutation checks lock the classification rule itself: the token is accepted
+# only under reverse analysis, while a duplicate in any other section fails.
+cat > "$SCRATCH/help-only-reverse.txt" <<'EOF'
+可用能力:
 
-for index, line in enumerate(lines):
-    heading = section_pattern.fullmatch(line)
-    if heading is None:
-        continue
-    title = heading.group(1)
-    if title != allowed_section_title:
-        continue
-    section_end = len(lines)
-    for candidate in range(index + 1, len(lines)):
-        if section_pattern.fullmatch(lines[candidate]):
-            section_end = candidate
-            break
-    allowed_sections.append((title, lines[index + 1 : section_end]))
+  [逆向分析]
+    jadx pwntools gef
 
-matching_sections = [
-    title
-    for title, section_lines in allowed_sections
-    if any("pwntools" in line.split() for line in section_lines)
-]
-if not matching_sections:
-    inspected = [title for title, _ in allowed_sections]
-    raise SystemExit(
-        "bootstrap human help must include the complete token 'pwntools' inside "
-        f"the [{allowed_section_title}] section before the next section heading; "
-        f"inspected sections: {inspected!r}"
-    )
-PY
+  [其他]
+    not-pwntools ghidra-mcp
+EOF
+"$REAL_PYTHON" "$HELP_VALIDATOR" "$SCRATCH/help-only-reverse.txt"
+
+cat > "$SCRATCH/help-duplicate-section.txt" <<'EOF'
+可用能力:
+
+  [逆向分析]
+    jadx pwntools gef
+
+  [其他]
+    pwntools ghidra-mcp
+EOF
+if "$REAL_PYTHON" "$HELP_VALIDATOR" "$SCRATCH/help-duplicate-section.txt" \
+    >/dev/null 2>&1; then
+    echo "help validator mutation survived: duplicate pwntools classification was accepted" >&2
+    exit 1
+fi
 
 "$REAL_PYTHON" - \
     "$REPO_ROOT/skills/scripts/bootstrap-manifest.json" \
