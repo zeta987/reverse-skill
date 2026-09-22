@@ -123,7 +123,7 @@ expected_pwntools_fields = [
     "pwntools",
     "reverse-engineering",
     "CTF pwn 利用开发框架",
-    "--version",
+    "version",
     "pwn",
 ]
 if source_pwntools_fields != expected_pwntools_fields:
@@ -217,10 +217,13 @@ fi
 
 cat > "$BIN_DIR/pwn" <<'STUB'
 #!/bin/bash
-if [[ "${1:-}" == "--version" ]]; then
-    printf '%s\n' 'Pwntools 4.15.0'
+if [[ $# -ne 1 || "$1" != "version" ]]; then
+    printf 'pwn test stub: expected exactly one argument: version; got:' >&2
+    printf ' <%s>' "$@" >&2
+    printf '\n' >&2
+    exit 64
 fi
-exit 0
+printf '%s\n' '[*] Pwntools v4.15.0' >&2
 STUB
 chmod +x "$BIN_DIR/pwn"
 
@@ -303,9 +306,9 @@ else:
                 "pwntools Markdown path must resolve to the pwn stub: "
                 f"got {tool_row[4]!r}"
             )
-        if tool_row[5] != "Pwntools 4.15.0":
+        if tool_row[5] != "[*] Pwntools v4.15.0":
             errors.append(
-                "pwntools Markdown version must be 'Pwntools 4.15.0', "
+                "pwntools Markdown version must be '[*] Pwntools v4.15.0', "
                 f"got {tool_row[5]!r}"
             )
         if tool_row[6] != "command":
@@ -400,9 +403,9 @@ elif have_jq:
                     "pwntools JSON resolved_path must point to the pwn stub: "
                     f"{pwntools.get('resolved_path')!r}"
                 )
-            if pwntools.get("version") != "Pwntools 4.15.0":
+            if pwntools.get("version") != "[*] Pwntools v4.15.0":
                 errors.append(
-                    "pwntools JSON version must be 'Pwntools 4.15.0', "
+                    "pwntools JSON version must be '[*] Pwntools v4.15.0', "
                     f"got {pwntools.get('version')!r}"
                 )
             if pwntools.get("source") != "command":

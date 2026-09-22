@@ -2,9 +2,9 @@
 
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 
-**Goal:** Preserve PR #144 contributor provenance and complete pwntools discovery, version reporting, capability visibility, bootstrap listing, manifest verification, and CI coverage.
+**Goal:** Preserve PR #144 contributor provenance and complete pwntools discovery, version reporting, capability visibility, bootstrap listing, manifest verification, and CI coverage while keeping Kali and client-neutral indexes on the real `pwn version` CLI contract.
 
-**Architecture:** Treat the original PR head as the integration baseline, then add one hermetic Bash regression that drives the real Kali refresh/bootstrap scripts through a stub `pwn` executable. Make only targeted catalog, capability-list, help-list, manifest, and workflow changes; avoid broader manifest-generation refactors.
+**Architecture:** Treat the original PR head as the integration baseline, then drive both real refresh paths through strict hermetic `pwn` stubs that accept only the `version` subcommand. Make only targeted catalog, client-neutral index, capability-list, help-list, manifest, and workflow changes; avoid broader manifest-generation refactors.
 
 **Tech Stack:** Bash, JSON, Python 3 assertions, GitHub Actions YAML, Git.
 
@@ -55,6 +55,7 @@ Expected: exit 0; merge commit has two parents.
 
 **Files:**
 - Create: `kali/scripts/test-pwntools-discovery.sh`
+- Modify: `skills/scripts/test-client-neutral-bootstrap.sh`
 - Modify: `.github/workflows/ci.yml`
 
 **Step 1: Write the hermetic test**
@@ -63,14 +64,16 @@ The test must:
 
 - create a temporary `bin` directory;
 - link required host commands (`bash`, `date`, `dirname`, `head`, `mktemp`, `python3`, `uname`, and `jq` when present);
-- create a stub executable `pwn` that prints `Pwntools 4.15.0` for `--version`;
+- create a strict stub executable `pwn` that requires exactly one argument equal to `version`, rejects every other invocation with a clear stderr diagnostic and non-zero exit, and writes `[*] Pwntools v4.15.0` to stderr for the valid call;
 - run `kali/scripts/refresh-tool-index.sh` into temporary Markdown and JSON files;
-- assert exactly one `pwntools` JSON record with `available=true`, the stub path, and version `Pwntools 4.15.0`;
+- assert exactly one `pwntools` JSON record with `available=true`, the stub path, and version `[*] Pwntools v4.15.0`;
 - assert the Markdown capability row marks `pwntools` available and installable through `pip-package`;
 - assert `bootstrap-reverse.sh --list` contains the exact token `pwntools`;
 - parse both `skills/scripts/bootstrap-manifest.json` and `kali/scripts/bootstrap-manifest.json` and assert `verifyCommand == "pwn"`.
 
 The script must have `set -euo pipefail`, clean its temporary directory with a trap, and perform no package installation or network access.
+
+Extend the existing client-neutral regression with the same strict stub. After its first refresh, assert one and only one pwntools JSON record with `available=true`, the canonical stub path, version `[*] Pwntools v4.15.0`, source `command`, skill `reverse-engineering`, and purpose `CTF pwn exploit development framework`. Use explicit conditions and `SystemExit` for these new checks rather than adding Python `assert` statements.
 
 **Step 2: Wire the test into Ubuntu CI**
 
@@ -88,14 +91,17 @@ Run:
 
 ```bash
 bash kali/scripts/test-pwntools-discovery.sh
+bash skills/scripts/test-client-neutral-bootstrap.sh
 ```
 
-Expected: FAIL on missing version or another explicitly asserted incomplete #144 behaviour, not on test setup.
+Expected: both FAIL because their production refresh catalog invokes the rejected `--version` option instead of `pwn version`, not because of test setup.
 
 **Step 4: Commit the red test**
 
 ```bash
-git add kali/scripts/test-pwntools-discovery.sh .github/workflows/ci.yml
+git add kali/scripts/test-pwntools-discovery.sh \
+  skills/scripts/test-client-neutral-bootstrap.sh \
+  .github/workflows/ci.yml
 git commit -m "test(kali): cover pwntools discovery integration"
 ```
 
@@ -106,6 +112,7 @@ git commit -m "test(kali): cover pwntools discovery integration"
 **Files:**
 - Modify: `kali/scripts/lib/tool-discovery.sh`
 - Modify: `kali/scripts/refresh-tool-index.sh`
+- Modify: `skills/scripts/refresh-tool-index.sh`
 - Modify: `kali/scripts/bootstrap-reverse.sh`
 - Modify: `kali/scripts/bootstrap-manifest.json`
 - Modify: `skills/scripts/bootstrap-manifest.json`
@@ -115,8 +122,10 @@ git commit -m "test(kali): cover pwntools discovery integration"
 Change the #144 row to:
 
 ```bash
-"pwntools|reverse-engineering|CTF pwn 利用开发框架|--version|pwn"
+"pwntools|reverse-engineering|CTF pwn 利用开发框架|version|pwn"
 ```
+
+Change the client-neutral catalog version command from `pwn --version` to `pwn version`, and make its version runner pass only populated arguments rather than an extra empty placeholder. Both indexes must invoke the stub with exactly one argument and record the first merged stdout/stderr line from the real CLI contract, `[*] Pwntools v4.15.0`.
 
 **Step 2: Add capability visibility**
 
@@ -146,6 +155,7 @@ Run:
 
 ```bash
 bash kali/scripts/test-pwntools-discovery.sh
+bash skills/scripts/test-client-neutral-bootstrap.sh
 ```
 
 Expected: exit 0 and a final success message.
@@ -155,6 +165,7 @@ Expected: exit 0 and a final success message.
 ```bash
 git add kali/scripts/lib/tool-discovery.sh \
   kali/scripts/refresh-tool-index.sh \
+  skills/scripts/refresh-tool-index.sh \
   kali/scripts/bootstrap-reverse.sh \
   kali/scripts/bootstrap-manifest.json \
   skills/scripts/bootstrap-manifest.json

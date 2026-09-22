@@ -33,6 +33,18 @@ exit 0
 STUB
 chmod +x "$BIN_DIR/ghidra"
 
+cat > "$BIN_DIR/pwn" <<'STUB'
+#!/bin/bash
+if [[ $# -ne 1 || "$1" != "version" ]]; then
+  printf 'pwn test stub: expected exactly one argument: version; got:' >&2
+  printf ' <%s>' "$@" >&2
+  printf '\n' >&2
+  exit 64
+fi
+printf '%s\n' '[*] Pwntools v4.15.0' >&2
+STUB
+chmod +x "$BIN_DIR/pwn"
+
 export PATH="$BIN_DIR:$PATH"
 export HOME="$HOME_DIR"
 export REVERSE_SKILL_TOOLS_DIR="$TOOLS_DIR"
@@ -43,7 +55,7 @@ MD="$SCRATCH/tool-index.md"
 JSON="$SCRATCH/tool-index.json"
 PATH="$BIN_DIR" "$BIN_DIR/bash" "$REFRESH" "$MD" "$JSON" >/dev/null
 
-python3 - "$JSON" "$BIN_DIR/ghidra" <<'PY'
+python3 - "$JSON" "$BIN_DIR/ghidra" "$BIN_DIR/pwn" <<'PY'
 import json, os, sys
 data = json.load(open(sys.argv[1], encoding='utf-8'))
 tools = data['tools']
@@ -54,6 +66,29 @@ assert by_tool['jshookmcp']['available'] is False, 'npx must not masquerade as j
 assert by_tool['reqable-mcp']['available'] is False, 'npx must not masquerade as reqable-mcp'
 assert by_tool['ghidra']['available'] is True, 'the distro-provided ghidra launcher must be discovered'
 assert os.path.realpath(by_tool['ghidra']['path']) == os.path.realpath(sys.argv[2])
+pwntools_matches = [tool for tool in tools if tool.get('name') == 'pwntools']
+if len(pwntools_matches) != 1:
+    raise SystemExit(
+        f"expected exactly one pwntools tool record, got {len(pwntools_matches)}"
+    )
+pwntools = pwntools_matches[0]
+expected_pwntools = {
+    'available': True,
+    'version': '[*] Pwntools v4.15.0',
+    'source': 'command',
+    'skill': 'reverse-engineering',
+    'purpose': 'CTF pwn exploit development framework',
+}
+for field, expected in expected_pwntools.items():
+    if pwntools.get(field) != expected:
+        raise SystemExit(
+            f"pwntools {field} must be {expected!r}, got {pwntools.get(field)!r}"
+        )
+if os.path.realpath(pwntools.get('path') or '') != os.path.realpath(sys.argv[3]):
+    raise SystemExit(
+        "pwntools path must resolve to the strict pwn stub: "
+        f"got {pwntools.get('path')!r}"
+    )
 by_cap = {c['name']: c for c in data['capabilities']}
 assert by_cap['jshookmcp']['ready'] is False
 assert by_cap['reqable-mcp']['ready'] is False
