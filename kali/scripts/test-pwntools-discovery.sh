@@ -102,6 +102,34 @@ if len(source_pwntools_lines) != 1:
         f"found {len(source_pwntools_lines)}"
     )
 
+source_pwntools_match = entry_pattern.fullmatch(source_pwntools_lines[0])
+if source_pwntools_match is None:
+    raise SystemExit(
+        f"production pwntools catalog row is malformed: {source_pwntools_lines[0]!r}"
+    )
+source_pwntools_fields = source_pwntools_match.group(2).split("|")
+if len(source_pwntools_fields) != 5:
+    raise SystemExit(
+        "production pwntools catalog row must have exactly five fields: "
+        f"{source_pwntools_match.group(2)!r}"
+    )
+contract_errors = []
+if source_pwntools_fields[4] != "pwn":
+    contract_errors.append(
+        "production pwntools fallback_text must be exactly 'pwn', "
+        f"got {source_pwntools_fields[4]!r}"
+    )
+if source_pwntools_fields[3] != "--version":
+    contract_errors.append(
+        "production pwntools version_args must be exactly '--version', "
+        f"got {source_pwntools_fields[3]!r}"
+    )
+if contract_errors:
+    raise SystemExit(
+        "production pwntools catalog contract failed:\n- "
+        + "\n- ".join(contract_errors)
+    )
+
 for index in range(catalog_start + 1, catalog_end):
     stripped = lines[index].strip()
     if not stripped or stripped.startswith("#"):
@@ -363,6 +391,50 @@ import sys
 tokens = sys.argv[1].split()
 if "pwntools" not in tokens:
     raise SystemExit("bootstrap --list must include the complete token 'pwntools'")
+PY
+
+set +e
+help_output="$(env PATH="$BIN_DIR" HOME="$HOME_DIR" "$REAL_BASH" "$BOOTSTRAP" 2>&1)"
+help_status=$?
+set -e
+if [[ $help_status -eq 0 ]]; then
+    echo "bootstrap without arguments must exit non-zero" >&2
+    exit 1
+fi
+"$REAL_PYTHON" - "$help_output" <<'PY'
+import re
+import sys
+
+lines = sys.argv[1].splitlines()
+section_pattern = re.compile(r"^\s*\[([^]]+)\]\s*$")
+allowed_sections = []
+
+for index, line in enumerate(lines):
+    heading = section_pattern.fullmatch(line)
+    if heading is None:
+        continue
+    title = heading.group(1)
+    if "逆向" not in title and "ctf" not in title.casefold():
+        continue
+    section_end = len(lines)
+    for candidate in range(index + 1, len(lines)):
+        if section_pattern.fullmatch(lines[candidate]):
+            section_end = candidate
+            break
+    allowed_sections.append((title, lines[index + 1 : section_end]))
+
+matching_sections = [
+    title
+    for title, section_lines in allowed_sections
+    if any("pwntools" in line.split() for line in section_lines)
+]
+if not matching_sections:
+    inspected = [title for title, _ in allowed_sections]
+    raise SystemExit(
+        "bootstrap human help must include the complete token 'pwntools' inside "
+        "a CTF/reverse-analysis section before the next section heading; "
+        f"inspected sections: {inspected!r}"
+    )
 PY
 
 "$REAL_PYTHON" - \
