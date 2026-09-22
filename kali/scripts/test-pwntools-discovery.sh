@@ -8,6 +8,7 @@ DISCOVERY="$SCRIPT_DIR/lib/tool-discovery.sh"
 BOOTSTRAP="$SCRIPT_DIR/bootstrap-reverse.sh"
 REAL_BASH="$(command -v bash)"
 REAL_PYTHON="$(command -v python3)"
+REAL_HEAD="$(command -v head)"
 SCRATCH="$(mktemp -d /tmp/reverse-pwntools-discovery-XXXXXX)"
 trap 'rm -rf -- "$SCRATCH"' EXIT
 
@@ -199,13 +200,32 @@ REFRESH="$FIXTURE_SCRIPTS/refresh-tool-index.sh"
 
 # Keep discovery hermetic: expose only the host utilities required by the real
 # refresh script. In particular, no host security tools can leak into results.
-for name in bash date dirname head mktemp python3 uname; do
+for name in bash date dirname mktemp python3 uname; do
     source_path="$(command -v "$name")" || {
         echo "required test dependency not found: $name" >&2
         exit 1
     }
     ln -s "$source_path" "$BIN_DIR/$name"
 done
+
+# Sentinel for probe-local terminal suppression. A correct
+# `PWNLIB_NOTERM=1 pwn version | head` scopes the variable to pwn; a global
+# export reaches head and is rejected instead of silently weakening this test.
+cat > "$BIN_DIR/head" <<'STUB'
+#!/bin/bash
+: "${TEST_REAL_HEAD:?TEST_REAL_HEAD must point to the host head executable}"
+: "${TEST_HEAD_SENTINEL_MARKER:?TEST_HEAD_SENTINEL_MARKER must be set}"
+if [[ "${PWNLIB_NOTERM+x}" == "x" ]]; then
+    if [[ ! -e "$TEST_HEAD_SENTINEL_MARKER" ]]; then
+        printf 'head sentinel: PWNLIB_NOTERM leaked outside the pwntools probe (value=%q)\n' \
+            "${PWNLIB_NOTERM-}" >&2
+        : > "$TEST_HEAD_SENTINEL_MARKER"
+    fi
+    exit 97
+fi
+exec "$TEST_REAL_HEAD" "$@"
+STUB
+chmod +x "$BIN_DIR/head"
 
 HAVE_JQ=false
 if source_path="$(command -v jq 2>/dev/null)"; then
@@ -237,9 +257,14 @@ chmod +x "$BIN_DIR/pwn"
 (
     cd "$WORK_DIR"
     unset TERM PWNLIB_NOTERM
-    env PATH="$BIN_DIR" HOME="$HOME_DIR" \
+    env PATH="$BIN_DIR" HOME="$HOME_DIR" TEST_REAL_HEAD="$REAL_HEAD" \
+        TEST_HEAD_SENTINEL_MARKER="$SCRATCH/head-leak" \
         "$REAL_BASH" "$REFRESH" "$OUTPUT_MD" "$OUTPUT_JSON" >/dev/null
 )
+if [[ -e "$SCRATCH/head-leak" ]]; then
+    echo "head sentinel marker recorded a leaked PWNLIB_NOTERM" >&2
+    exit 1
+fi
 
 "$REAL_PYTHON" - \
     "$OUTPUT_MD" \
