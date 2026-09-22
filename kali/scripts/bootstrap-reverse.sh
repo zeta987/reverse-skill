@@ -397,10 +397,14 @@ install_manifest_release() {
 
 ensure_capability() {
     local name="$1"
+    local verify_command="$name"
+    if [[ "$name" == "pwntools" ]]; then
+        verify_command="pwn"
+    fi
 
     # 先检查是否已可用
-    if command -v "$name" &>/dev/null; then
-        log_ok "$name 已可用: $(command -v "$name")"
+    if command -v "$verify_command" &>/dev/null; then
+        log_ok "$name 已可用: $(command -v "$verify_command")"
         return 0
     fi
 
