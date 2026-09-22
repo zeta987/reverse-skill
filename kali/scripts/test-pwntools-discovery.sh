@@ -567,11 +567,24 @@ if [[ $bootstrap_status -ne 0 ]]; then
     printf '%s\n' "$bootstrap_output" >&2
     exit 1
 fi
-if [[ "$bootstrap_output" != *"pwntools 已可用"* && \
-      "$bootstrap_output" != *"✓ pwntools"* ]]; then
-    echo "bootstrap did not report pwntools as already available or ready" >&2
-    printf '%s\n' "$bootstrap_output" >&2
-    exit 1
-fi
+
+# A successful exit or the generic completion summary is insufficient: the
+# preflight itself must report that the logical pwntools capability resolved to
+# the isolated pwn executable. Strip terminal color before matching the exact
+# ready line so ANSI formatting cannot weaken or break the assertion.
+"$REAL_PYTHON" - "$bootstrap_output" "$BIN_DIR/pwn" <<'PY'
+import re
+import sys
+
+ansi_escape = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+lines = [ansi_escape.sub("", line).rstrip("\r") for line in sys.argv[1].splitlines()]
+expected = f"[OK] pwntools 已可用: {sys.argv[2]}"
+if expected not in lines:
+    raise SystemExit(
+        "bootstrap preflight did not report the resolved pwn stub path on the "
+        f"exact ready line {expected!r}; normalized output:\n"
+        + "\n".join(lines)
+    )
+PY
 
 echo "Kali pwntools discovery regression passed"
