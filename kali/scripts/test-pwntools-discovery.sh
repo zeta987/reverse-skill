@@ -9,7 +9,7 @@ BOOTSTRAP="$SCRIPT_DIR/bootstrap-reverse.sh"
 REAL_BASH="$(command -v bash)"
 REAL_PYTHON="$(command -v python3)"
 SCRATCH="$(mktemp -d /tmp/reverse-pwntools-discovery-XXXXXX)"
-trap 'rm -rf "$SCRATCH"' EXIT
+trap 'rm -rf -- "$SCRATCH"' EXIT
 
 BIN_DIR="$SCRATCH/bin"
 HOME_DIR="$SCRATCH/home"
@@ -18,31 +18,148 @@ OUTPUT_MD="$SCRATCH/tool-index.md"
 OUTPUT_JSON="$SCRATCH/tool-index.json"
 mkdir -p "$BIN_DIR" "$HOME_DIR" "$FIXTURE_SCRIPTS/lib"
 
-# Exercise a byte-for-byte copy of the production refresh path and discovery
-# catalog, changing only the port probe in the temporary copy. This prevents
-# localhost connections while preserving the real discovery implementation.
+# Exercise temporary copies of the production refresh path and discovery
+# catalog. Disable the port probe and quarantine literal absolute fallback
+# paths in the copied catalog so the fixture cannot contact localhost or run a
+# host security tool outside its isolated PATH.
 cp "$REFRESH" "$FIXTURE_SCRIPTS/refresh-tool-index.sh"
 cp "$DISCOVERY" "$FIXTURE_SCRIPTS/lib/tool-discovery.sh"
-"$REAL_PYTHON" - "$FIXTURE_SCRIPTS/lib/tool-discovery.sh" <<'PY'
+"$REAL_PYTHON" - \
+    "$DISCOVERY" \
+    "$FIXTURE_SCRIPTS/lib/tool-discovery.sh" \
+    "$SCRATCH/unavailable-host-paths" <<'PY'
+import hashlib
+import re
 import sys
 from pathlib import Path
 
-path = Path(sys.argv[1])
-lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-starts = [index for index, line in enumerate(lines) if line.rstrip("\r\n") == "test_tcp_port() {"]
-if len(starts) != 1:
-    raise SystemExit(f"expected exactly one test_tcp_port function, found {len(starts)}")
+source_path = Path(sys.argv[1])
+fixture_path = Path(sys.argv[2])
+unavailable_root = Path(sys.argv[3])
+source_bytes = source_path.read_bytes()
+source_hash = hashlib.sha256(source_bytes).hexdigest()
+source_text = source_bytes.decode("utf-8")
+fixture_text = fixture_path.read_text(encoding="utf-8")
 
-start = starts[0]
-ends = [index for index in range(start + 1, len(lines)) if lines[index].rstrip("\r\n") == "}"]
-if not ends:
-    raise SystemExit("could not find the end of test_tcp_port")
-end = ends[0]
-if end - start > 20:
-    raise SystemExit("test_tcp_port is no longer the expected short function")
+port_probe = """test_tcp_port() {
+    local port="$1"
+    local host="${2:-127.0.0.1}"
+    (echo >/dev/tcp/"$host"/"$port") 2>/dev/null && return 0
+    # fallback to nc
+    nc -z "$host" "$port" 2>/dev/null && return 0
+    return 1
+}
+"""
+if fixture_text.count(port_probe) != 1:
+    raise SystemExit(
+        "expected exactly one canonical test_tcp_port source block, "
+        f"found {fixture_text.count(port_probe)}"
+    )
+fixture_text = fixture_text.replace(
+    port_probe,
+    "test_tcp_port() {\n    return 1\n}\n",
+    1,
+)
 
-lines[start : end + 1] = ["test_tcp_port() {\n", "    return 1\n", "}\n"]
-path.write_text("".join(lines), encoding="utf-8")
+lines = fixture_text.splitlines(keepends=True)
+catalog_starts = [
+    index
+    for index, line in enumerate(lines)
+    if line.rstrip("\r\n") == "declare -a TOOL_CATALOG=("
+]
+if len(catalog_starts) != 1:
+    raise SystemExit(
+        f"expected exactly one TOOL_CATALOG declaration, found {len(catalog_starts)}"
+    )
+catalog_start = catalog_starts[0]
+catalog_ends = [
+    index
+    for index in range(catalog_start + 1, len(lines))
+    if lines[index].rstrip("\r\n") == ")"
+]
+if not catalog_ends:
+    raise SystemExit("could not find the end of TOOL_CATALOG")
+catalog_end = catalog_ends[0]
+entry_pattern = re.compile(r'^(\s*)"([^"]*)"(\r?\n)?$')
+rewritten = 0
+source_pwntools_lines = [
+    line
+    for line in source_text.splitlines(keepends=True)
+    if line.strip().startswith('"pwntools|')
+]
+if len(source_pwntools_lines) != 1:
+    raise SystemExit(
+        "production catalog must contain exactly one pwntools row; "
+        f"found {len(source_pwntools_lines)}"
+    )
+
+for index in range(catalog_start + 1, catalog_end):
+    stripped = lines[index].strip()
+    if not stripped or stripped.startswith("#"):
+        continue
+    match = entry_pattern.fullmatch(lines[index])
+    if match is None:
+        raise SystemExit(f"malformed TOOL_CATALOG line {index + 1}: {lines[index]!r}")
+    indent, payload, newline = match.groups()
+    fields = payload.split("|")
+    if len(fields) != 5:
+        raise SystemExit(
+            f"TOOL_CATALOG line {index + 1} must have exactly five fields: {payload!r}"
+        )
+    name, skill, purpose, version_args, fallback_text = fields
+    if name == "pwntools":
+        if lines[index] != source_pwntools_lines[0]:
+            raise SystemExit("temporary pwntools catalog row differs from production")
+        if fallback_text != "pwntools,pwn":
+            raise SystemExit(
+                "pwntools fallback contract changed; expected 'pwntools,pwn', "
+                f"got {fallback_text!r}"
+            )
+        continue
+
+    candidates = fallback_text.split(",") if fallback_text else []
+    for candidate_index, candidate in enumerate(candidates):
+        if not candidate.startswith("/"):
+            continue
+        candidates[candidate_index] = str(
+            unavailable_root / f"{name}-{candidate_index}"
+        )
+        rewritten += 1
+    fields[4] = ",".join(candidates)
+    lines[index] = f'{indent}"{"|".join(fields)}"{newline or ""}'
+
+if rewritten <= 0:
+    raise SystemExit("expected to quarantine at least one absolute catalog fallback")
+
+fixture_pwntools_lines = [
+    line
+    for line in lines[catalog_start + 1 : catalog_end]
+    if line.strip().startswith('"pwntools|')
+]
+if fixture_pwntools_lines != source_pwntools_lines:
+    raise SystemExit("pwntools row was not preserved exactly in the temporary catalog")
+
+for index in range(catalog_start + 1, catalog_end):
+    stripped = lines[index].strip()
+    if not stripped or stripped.startswith("#"):
+        continue
+    match = entry_pattern.fullmatch(lines[index])
+    if match is None:
+        raise SystemExit(f"rewritten TOOL_CATALOG line {index + 1} is malformed")
+    fields = match.group(2).split("|")
+    for candidate in fields[4].split(",") if fields[4] else []:
+        if candidate.startswith("/") and not candidate.startswith(f"{unavailable_root}/"):
+            raise SystemExit(
+                f"absolute fallback escaped quarantine on line {index + 1}: {candidate!r}"
+            )
+
+fixture_path.write_text("".join(lines), encoding="utf-8")
+source_hash_after = hashlib.sha256(source_path.read_bytes()).hexdigest()
+if source_hash_after != source_hash:
+    raise SystemExit(
+        "production tool-discovery.sh changed while creating the fixture: "
+        f"before={source_hash}, after={source_hash_after}"
+    )
 PY
 REFRESH="$FIXTURE_SCRIPTS/refresh-tool-index.sh"
 
@@ -61,7 +178,7 @@ if source_path="$(command -v jq 2>/dev/null)"; then
     ln -s "$source_path" "$BIN_DIR/jq"
     HAVE_JQ=true
 else
-    echo "SKIP: jq is unavailable; JSON-only pwntools assertions will not run" >&2
+    echo "INFO: jq is unavailable; validating the documented fallback JSON contract" >&2
 fi
 
 cat > "$BIN_DIR/pwn" <<'STUB'
@@ -78,50 +195,161 @@ chmod +x "$BIN_DIR/pwn"
 env PATH="$BIN_DIR" HOME="$HOME_DIR" \
     "$REAL_BASH" "$REFRESH" "$OUTPUT_MD" "$OUTPUT_JSON" >/dev/null
 
-if [[ "$HAVE_JQ" == "true" ]]; then
-    "$REAL_PYTHON" - "$OUTPUT_JSON" "$BIN_DIR/pwn" <<'PY'
+"$REAL_PYTHON" - \
+    "$OUTPUT_MD" \
+    "$OUTPUT_JSON" \
+    "$BIN_DIR/pwn" \
+    "$HAVE_JQ" <<'PY'
 import json
 import os
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as stream:
-    data = json.load(stream)
-
-matches = [tool for tool in data["tools"] if tool.get("name") == "pwntools"]
-assert len(matches) == 1, f"expected exactly one pwntools entry, got {len(matches)}"
-pwntools = matches[0]
-assert pwntools.get("available") is True, "pwntools must be available through the pwn command"
-assert os.path.realpath(pwntools.get("resolved_path", "")) == os.path.realpath(sys.argv[2]), (
-    f"pwntools resolved_path must point to the pwn stub: {pwntools.get('resolved_path')!r}"
-)
-assert pwntools.get("version") == "Pwntools 4.15.0", (
-    f"expected pwntools version 'Pwntools 4.15.0', got {pwntools.get('version')!r}"
-)
-PY
-fi
-
-"$REAL_PYTHON" - "$OUTPUT_MD" <<'PY'
+import re
 import sys
 from pathlib import Path
 
-lines = Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
-in_capability_view = False
-matches = []
-for line in lines:
-    if line.strip().startswith("## 能力状态视图"):
-        in_capability_view = True
-        continue
-    if not in_capability_view or not line.lstrip().startswith("|"):
-        continue
-    cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
-    if cells and cells[0] == "pwntools":
-        matches.append(cells)
+markdown_path = Path(sys.argv[1])
+json_path = Path(sys.argv[2])
+pwn_stub = sys.argv[3]
+have_jq = sys.argv[4] == "true"
+lines = markdown_path.read_text(encoding="utf-8").splitlines()
+errors = []
 
-assert len(matches) == 1, f"expected exactly one pwntools capability row, got {len(matches)}"
-row = matches[0]
-assert len(row) >= 6, f"malformed pwntools capability row: {row!r}"
-assert row[1] == "✓", f"pwntools capability must be available, got {row[1]!r}"
-assert row[5] == "pip-package", f"pwntools install method must be pip-package, got {row[5]!r}"
+
+def parse_markdown_row(line):
+    stripped = line.strip()
+    if not (stripped.startswith("|") and stripped.endswith("|")):
+        return None
+    return [cell.strip() for cell in stripped[1:-1].split("|")]
+
+
+tool_header = ["工具", "归属 skill", "作用", "可用", "路径", "版本", "来源", "脚本引用"]
+tool_headers = [
+    index for index, line in enumerate(lines) if parse_markdown_row(line) == tool_header
+]
+tool_matches = []
+if len(tool_headers) != 1:
+    errors.append(f"expected exactly one Markdown tool table, got {len(tool_headers)}")
+else:
+    for line in lines[tool_headers[0] + 2 :]:
+        row = parse_markdown_row(line)
+        if row is None:
+            break
+        if row and row[0] == "pwntools":
+            tool_matches.append(row)
+
+if len(tool_matches) != 1:
+    errors.append(
+        f"expected exactly one pwntools Markdown tool row, got {len(tool_matches)}"
+    )
+else:
+    tool_row = tool_matches[0]
+    if len(tool_row) != 8:
+        errors.append(
+            f"pwntools Markdown tool row must have exactly 8 columns: {tool_row!r}"
+        )
+    else:
+        if tool_row[3] != "yes":
+            errors.append(f"pwntools Markdown availability must be 'yes', got {tool_row[3]!r}")
+        if os.path.realpath(tool_row[4]) != os.path.realpath(pwn_stub):
+            errors.append(
+                "pwntools Markdown path must resolve to the pwn stub: "
+                f"got {tool_row[4]!r}"
+            )
+        if tool_row[5] != "Pwntools 4.15.0":
+            errors.append(
+                "pwntools Markdown version must be 'Pwntools 4.15.0', "
+                f"got {tool_row[5]!r}"
+            )
+
+capability_headings = [
+    index
+    for index, line in enumerate(lines)
+    if line.startswith("## ") and line[3:].startswith("能力状态视图")
+]
+capability_matches = []
+if len(capability_headings) != 1:
+    errors.append(
+        f"expected exactly one capability-view heading, got {len(capability_headings)}"
+    )
+else:
+    section_start = capability_headings[0] + 1
+    section_end = len(lines)
+    for index in range(section_start, len(lines)):
+        if re.match(r"^##(?:\s|$)", lines[index]):
+            section_end = index
+            break
+    for line in lines[section_start:section_end]:
+        row = parse_markdown_row(line)
+        if row and row[0] == "pwntools":
+            capability_matches.append(row)
+
+if len(capability_matches) != 1:
+    errors.append(
+        "expected exactly one pwntools capability row before the next level-2 "
+        f"heading, got {len(capability_matches)}"
+    )
+else:
+    capability_row = capability_matches[0]
+    if len(capability_row) != 6:
+        errors.append(
+            "pwntools capability row must have exactly 6 columns: "
+            f"{capability_row!r}"
+        )
+    else:
+        if capability_row[1] != "✓":
+            errors.append(
+                f"pwntools capability must be available, got {capability_row[1]!r}"
+            )
+        if capability_row[5] != "pip-package":
+            errors.append(
+                "pwntools install method must be 'pip-package', "
+                f"got {capability_row[5]!r}"
+            )
+
+try:
+    with json_path.open(encoding="utf-8") as stream:
+        data = json.load(stream)
+except (OSError, json.JSONDecodeError) as exc:
+    raise SystemExit(f"tool-index JSON is not parseable: {exc}") from exc
+
+if not isinstance(data, dict):
+    errors.append(f"tool-index JSON root must be an object, got {type(data).__name__}")
+elif have_jq:
+    tools = data.get("tools")
+    if not isinstance(tools, list):
+        errors.append("jq JSON output must contain a tools array")
+    else:
+        json_matches = [
+            tool
+            for tool in tools
+            if isinstance(tool, dict) and tool.get("name") == "pwntools"
+        ]
+        if len(json_matches) != 1:
+            errors.append(
+                f"expected exactly one pwntools JSON entry, got {len(json_matches)}"
+            )
+        else:
+            pwntools = json_matches[0]
+            if pwntools.get("available") is not True:
+                errors.append("pwntools JSON availability must be true")
+            if os.path.realpath(pwntools.get("resolved_path", "")) != os.path.realpath(pwn_stub):
+                errors.append(
+                    "pwntools JSON resolved_path must point to the pwn stub: "
+                    f"{pwntools.get('resolved_path')!r}"
+                )
+            if pwntools.get("version") != "Pwntools 4.15.0":
+                errors.append(
+                    "pwntools JSON version must be 'Pwntools 4.15.0', "
+                    f"got {pwntools.get('version')!r}"
+                )
+else:
+    expected_note = "install jq for full JSON output"
+    if data.get("note") != expected_note:
+        errors.append(
+            f"fallback JSON note must be {expected_note!r}, got {data.get('note')!r}"
+        )
+
+if errors:
+    raise SystemExit("pwntools discovery validation failed:\n- " + "\n- ".join(errors))
 PY
 
 list_output="$(env PATH="$BIN_DIR" HOME="$HOME_DIR" "$REAL_BASH" "$BOOTSTRAP" --list)"
@@ -129,7 +357,8 @@ list_output="$(env PATH="$BIN_DIR" HOME="$HOME_DIR" "$REAL_BASH" "$BOOTSTRAP" --
 import sys
 
 tokens = sys.argv[1].split()
-assert "pwntools" in tokens, "bootstrap --list must include the complete token 'pwntools'"
+if "pwntools" not in tokens:
+    raise SystemExit("bootstrap --list must include the complete token 'pwntools'")
 PY
 
 "$REAL_PYTHON" - \
@@ -141,12 +370,23 @@ import sys
 for manifest_path in sys.argv[1:]:
     with open(manifest_path, encoding="utf-8") as stream:
         manifest = json.load(stream)
-    matches = [cap for cap in manifest["capabilities"] if cap.get("name") == "pwntools"]
-    assert len(matches) == 1, f"{manifest_path}: expected exactly one pwntools capability"
-    assert matches[0].get("verifyCommand") == "pwn", (
-        f"{manifest_path}: pwntools verifyCommand must be 'pwn', "
-        f"got {matches[0].get('verifyCommand')!r}"
-    )
+    capabilities = manifest.get("capabilities")
+    if not isinstance(capabilities, list):
+        raise SystemExit(f"{manifest_path}: capabilities must be an array")
+    matches = [
+        cap
+        for cap in capabilities
+        if isinstance(cap, dict) and cap.get("name") == "pwntools"
+    ]
+    if len(matches) != 1:
+        raise SystemExit(
+            f"{manifest_path}: expected exactly one pwntools capability, got {len(matches)}"
+        )
+    if matches[0].get("verifyCommand") != "pwn":
+        raise SystemExit(
+            f"{manifest_path}: pwntools verifyCommand must be 'pwn', "
+            f"got {matches[0].get('verifyCommand')!r}"
+        )
 PY
 
 echo "Kali pwntools discovery regression passed"
