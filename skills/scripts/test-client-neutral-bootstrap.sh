@@ -166,10 +166,16 @@ data = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 node_records = [tool for tool in data.get("tools", []) if tool.get("name") == "node"]
 if len(node_records) != 1:
     raise SystemExit(f"expected exactly one node JSON record, got {len(node_records)}")
-if node_records[0].get("version") is not None:
+node_record = node_records[0]
+if "version" not in node_record:
     raise SystemExit(
-        "empty node version_spec expected JSON null; "
-        f"got {node_records[0].get('version')!r}"
+        "empty node version_spec expected explicit JSON null field; "
+        "version field is missing"
+    )
+if node_record["version"] is not None:
+    raise SystemExit(
+        "empty node version_spec expected explicit JSON null field; "
+        f"got {node_record['version']!r}"
     )
 PY
   empty_version_validation_status=$?
