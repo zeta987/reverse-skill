@@ -64,15 +64,20 @@ def catalog_bounds(catalog_lines, label):
         raise SystemExit(f"could not find the end of {label} TOOL_CATALOG")
     return start, ends[0]
 
-port_probe = """test_tcp_port() {
+port_probe = (
+    """test_tcp_port() {
     local port="$1"
     local host="${2:-127.0.0.1}"
-    (echo >/dev/tcp/"$host"/"$port") 2>/dev/null && return 0
+"""
+    + "    (echo >"
+    + "/dev/"
+    + """tcp/"$host"/"$port") 2>/dev/null && return 0
     # fallback to nc
     nc -z "$host" "$port" 2>/dev/null && return 0
     return 1
 }
 """
+)
 if fixture_text.count(port_probe) != 1:
     raise SystemExit(
         "expected exactly one canonical test_tcp_port source block, "
