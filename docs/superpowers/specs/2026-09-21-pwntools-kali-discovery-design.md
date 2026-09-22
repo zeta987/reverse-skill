@@ -13,7 +13,7 @@ Integrate #144 while preserving its contributor commit, then complete the Kali-f
 3. The generated capability table includes `pwntools`, reports runtime availability through `pwn`, and identifies its installer as `pip-package`.
 4. `bootstrap-reverse.sh --list` and its human-readable help include `pwntools`.
 5. Both bootstrap manifests use the executable command `pwn` for post-install verification.
-6. Both Kali and client-neutral index regressions exercise the real `pwn version` CLI contract without installing pwntools or touching the host environment.
+6. Both Kali and client-neutral index regressions exercise the real `pwn version` CLI contract without installing pwntools or touching the host environment, including its no-terminal warning behaviour.
 
 ## Non-goals
 
@@ -26,7 +26,7 @@ Integrate #144 while preserving its contributor commit, then complete the Kali-f
 
 ### Tool catalog
 
-Keep the #144 catalog entry but use the `version` subcommand and the executable fallback `pwn`. The logical tool name remains `pwntools`; the resolved executable is `pwn`. Pwntools 4.15.0 exposes its version through `pwn version`; `pwn --version` is not a valid equivalent and exits non-zero.
+Keep the #144 catalog entry but use the `version` subcommand and the executable fallback `pwn`. The logical tool name remains `pwntools`; the resolved executable is `pwn`. Pwntools 4.15.0 exposes its version through `pwn version`; `pwn --version` is not a valid equivalent and exits non-zero. In an environment without `TERM`, the real command can exit successfully but write a `_curses.error: setupterm` warning before its version line. Set `PWNLIB_NOTERM=1` locally for this version probe so the captured first line remains the version. This environment override belongs only to the probe invocation; it must not change ordinary pwntools commands or executable-availability detection.
 
 Expected generated record:
 
@@ -53,9 +53,9 @@ Add a hermetic Bash test under `kali/scripts/` that:
 5. Asserts `bootstrap-reverse.sh --list` advertises pwntools.
 6. Parses both manifests and asserts `verifyCommand == "pwn"`.
 
-The `pwn` fixture accepts exactly one argument, `version`, writes the exact real CLI line `[*] Pwntools v4.15.0` to stderr, and fails every other invocation. This prevents the invalid `pwn --version` spelling from passing through a permissive stub. The test must not invoke package installation, network access, client configuration, or repository output paths.
+The `pwn` fixture accepts exactly one argument, `version`, and fails every other invocation. For a valid call it first writes the stable simulated no-terminal warning `Warning: _curses.error: setupterm: could not find terminfo database` unless `PWNLIB_NOTERM=1`, then writes the exact real CLI line `[*] Pwntools v4.15.0` to stderr. Each test unsets inherited `TERM` and `PWNLIB_NOTERM` around its refresh invocation, making the no-terminal precondition deterministic while still allowing production to set the variable on the child probe. This both prevents the invalid `pwn --version` spelling from passing through a permissive stub and proves that each production version probe sets the suppression variable locally. The generated version assertion stays exact, so an unsuppressed warning is recorded as the first line and produces a focused RED failure.
 
-The same executable has one version-command contract on every supported host path. Therefore the minimum change also updates `skills/scripts/refresh-tool-index.sh` from `pwn --version` to `pwn version`, ensures its version runner does not append empty placeholder arguments, and extends the existing `skills/scripts/test-client-neutral-bootstrap.sh` regression with the same strict stub and generated-record assertions.
+The same executable has one version-command contract on every supported host path. Therefore the minimum change also updates `skills/scripts/refresh-tool-index.sh` from `pwn --version` to `pwn version`, ensures its version runner does not append empty placeholder arguments, and extends the existing `skills/scripts/test-client-neutral-bootstrap.sh` regression with the same strict stub and generated-record assertions. Both production paths must run this particular probe with `PWNLIB_NOTERM=1`; the setting must not be exported globally.
 
 ### CI wiring
 
@@ -69,6 +69,8 @@ Run the new regression in the existing Ubuntu Bash CI job after shell syntax val
 4. Re-run both focused tests until green.
 5. Run Bash syntax, bootstrap-manifest, routing, repository-security, document-link, JSON, YAML, UTF-8/BOM and mojibake checks.
 
+For the no-terminal follow-up, first strengthen both strict stubs as described above and preserve the exact version assertions. Run the Kali regression in normal and Python-optimized modes plus the client-neutral regression and record RED failures whose actual version is the warning line. Commit only tests and documentation at this stage; production changes that add the probe-local `PWNLIB_NOTERM=1` follow in a separate GREEN commit.
+
 ## Integration and provenance
 
 Create a merge commit whose second parent is the original #144 head, preserving contributor provenance. Add the completion changes as a separate maintainer commit. Push only after local verification; wait for GitHub CI before fast-forwarding `main`. No force-push is permitted.
@@ -76,5 +78,5 @@ Create a merge commit whose second parent is the original #144 head, preserving 
 ## Failure handling
 
 - A missing `pwn` command must produce an unavailable pwntools record without aborting refresh.
-- A failing `pwn version` command may leave the version empty or record its first stderr diagnostic line, consistent with existing non-blocking discovery behaviour, but detection remains based on executable presence.
+- A failing `pwn version` command may leave the version empty or record its first stderr diagnostic line, consistent with existing non-blocking discovery behaviour, but detection remains based on executable presence. The known successful no-terminal warning is prevented with probe-local `PWNLIB_NOTERM=1`, rather than filtered from output.
 - Any CI failure blocks integration into `main`.

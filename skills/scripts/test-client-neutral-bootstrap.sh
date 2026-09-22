@@ -41,6 +41,9 @@ if [[ $# -ne 1 || "$1" != "version" ]]; then
   printf '\n' >&2
   exit 64
 fi
+if [[ "${PWNLIB_NOTERM:-}" != "1" ]]; then
+  printf '%s\n' 'Warning: _curses.error: setupterm: could not find terminfo database' >&2
+fi
 printf '%s\n' '[*] Pwntools v4.15.0' >&2
 STUB
 chmod +x "$BIN_DIR/pwn"
@@ -53,7 +56,10 @@ export CODEX_CONFIG_PATH="$CODEX_CFG"
 
 MD="$SCRATCH/tool-index.md"
 JSON="$SCRATCH/tool-index.json"
-PATH="$BIN_DIR" "$BIN_DIR/bash" "$REFRESH" "$MD" "$JSON" >/dev/null
+(
+  unset TERM PWNLIB_NOTERM
+  PATH="$BIN_DIR" "$BIN_DIR/bash" "$REFRESH" "$MD" "$JSON" >/dev/null
+)
 
 python3 - "$JSON" "$BIN_DIR/ghidra" "$BIN_DIR/pwn" <<'PY'
 import json, os, sys

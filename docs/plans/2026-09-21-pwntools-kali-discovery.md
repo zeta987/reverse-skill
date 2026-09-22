@@ -4,7 +4,7 @@
 
 **Goal:** Preserve PR #144 contributor provenance and complete pwntools discovery, version reporting, capability visibility, bootstrap listing, manifest verification, and CI coverage while keeping Kali and client-neutral indexes on the real `pwn version` CLI contract.
 
-**Architecture:** Treat the original PR head as the integration baseline, then drive both real refresh paths through strict hermetic `pwn` stubs that accept only the `version` subcommand. Make only targeted catalog, client-neutral index, capability-list, help-list, manifest, and workflow changes; avoid broader manifest-generation refactors.
+**Architecture:** Treat the original PR head as the integration baseline, then drive both real refresh paths through strict hermetic `pwn` stubs that accept only the `version` subcommand and reproduce the real no-terminal warning unless the probe sets `PWNLIB_NOTERM=1`. Make only targeted catalog, client-neutral index, capability-list, help-list, manifest, and workflow changes; avoid broader manifest-generation refactors.
 
 **Tech Stack:** Bash, JSON, Python 3 assertions, GitHub Actions YAML, Git.
 
@@ -125,7 +125,7 @@ Change the #144 row to:
 "pwntools|reverse-engineering|CTF pwn 利用开发框架|version|pwn"
 ```
 
-Change the client-neutral catalog version command from `pwn --version` to `pwn version`, and make its version runner pass only populated arguments rather than an extra empty placeholder. Both indexes must invoke the stub with exactly one argument and record the first merged stdout/stderr line from the real CLI contract, `[*] Pwntools v4.15.0`.
+Change the client-neutral catalog version command from `pwn --version` to `pwn version`, and make its version runner pass only populated arguments rather than an extra empty placeholder. Both indexes must invoke the stub with exactly one argument and record the first merged stdout/stderr line from the real CLI contract, `[*] Pwntools v4.15.0`. Preserve the generic runner's previous empty-spec semantics: parse and invoke a version specification only when it is both non-empty and not `none`.
 
 **Step 2: Add capability visibility**
 
@@ -223,6 +223,40 @@ git log --oneline --decorate origin/main..HEAD
 ```
 
 Expected: clean worktree; #144 head is an ancestor; design, merge, test, and implementation commits are visible.
+
+### Task 4a: Add the no-terminal warning RED regression
+
+**Objective:** Reproduce pwntools 4.15.0's successful no-`TERM` warning path and prove both production version probes must set `PWNLIB_NOTERM=1` locally.
+
+**Files:**
+- Modify: `kali/scripts/test-pwntools-discovery.sh`
+- Modify: `skills/scripts/test-client-neutral-bootstrap.sh`
+- Modify: `docs/superpowers/specs/2026-09-21-pwntools-kali-discovery-design.md`
+- Modify: `docs/plans/2026-09-21-pwntools-kali-discovery.md`
+
+**Step 1: Strengthen both strict stubs**
+
+After validating exactly one `version` argument, have each stub emit `Warning: _curses.error: setupterm: could not find terminfo database` to stderr when `${PWNLIB_NOTERM:-}` is not `1`, followed by `[*] Pwntools v4.15.0`. With `PWNLIB_NOTERM=1`, emit only the version line. Continue to reject unknown argument shapes with exit 64. Around the refresh under test, unset inherited `TERM` and `PWNLIB_NOTERM`; this fixes the no-terminal precondition without preventing production from setting `PWNLIB_NOTERM=1` locally on the child probe.
+
+Keep the generated version assertions exactly `[*] Pwntools v4.15.0`; do not accept, strip, or skip the warning in test code.
+
+**Step 2: Verify focused RED**
+
+Run:
+
+```bash
+bash kali/scripts/test-pwntools-discovery.sh
+PYTHONOPTIMIZE=1 bash kali/scripts/test-pwntools-discovery.sh
+bash skills/scripts/test-client-neutral-bootstrap.sh
+```
+
+Expected: all three invocations fail because the current production probes capture the warning as the version. The diagnostics must report the warning as the actual value, demonstrating that production needs a probe-local `PWNLIB_NOTERM=1` setting.
+
+**Step 3: Verify non-behavioural gates and commit RED**
+
+Run Bash syntax checks for both changed tests, repository-security and documentation-link checks, parse tracked JSON and YAML, and inspect the diff. Do not change production in this commit. Commit only the four files above as `test: cover pwntools no-terminal version output`.
+
+The later GREEN change must scope `PWNLIB_NOTERM=1` to the real `pwn version` process in both runners. It must not export the variable for ordinary commands or availability checks, and the generic client-neutral runner must retain the empty-version-spec behaviour described in Task 3.
 
 ### Task 5: Review, publish, CI, and integrate
 

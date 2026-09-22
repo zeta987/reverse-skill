@@ -223,6 +223,9 @@ if [[ $# -ne 1 || "$1" != "version" ]]; then
     printf '\n' >&2
     exit 64
 fi
+if [[ "${PWNLIB_NOTERM:-}" != "1" ]]; then
+    printf '%s\n' 'Warning: _curses.error: setupterm: could not find terminfo database' >&2
+fi
 printf '%s\n' '[*] Pwntools v4.15.0' >&2
 STUB
 chmod +x "$BIN_DIR/pwn"
@@ -233,6 +236,7 @@ chmod +x "$BIN_DIR/pwn"
 # or execute an untracked repository-root command.
 (
     cd "$WORK_DIR"
+    unset TERM PWNLIB_NOTERM
     env PATH="$BIN_DIR" HOME="$HOME_DIR" \
         "$REAL_BASH" "$REFRESH" "$OUTPUT_MD" "$OUTPUT_JSON" >/dev/null
 )
