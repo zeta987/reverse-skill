@@ -113,21 +113,17 @@ if len(source_pwntools_fields) != 5:
         "production pwntools catalog row must have exactly five fields: "
         f"{source_pwntools_match.group(2)!r}"
     )
-contract_errors = []
-if source_pwntools_fields[4] != "pwn":
-    contract_errors.append(
-        "production pwntools fallback_text must be exactly 'pwn', "
-        f"got {source_pwntools_fields[4]!r}"
-    )
-if source_pwntools_fields[3] != "--version":
-    contract_errors.append(
-        "production pwntools version_args must be exactly '--version', "
-        f"got {source_pwntools_fields[3]!r}"
-    )
-if contract_errors:
+expected_pwntools_fields = [
+    "pwntools",
+    "reverse-engineering",
+    "CTF pwn 利用开发框架",
+    "--version",
+    "pwn",
+]
+if source_pwntools_fields != expected_pwntools_fields:
     raise SystemExit(
-        "production pwntools catalog contract failed:\n- "
-        + "\n- ".join(contract_errors)
+        "production pwntools catalog payload must be exactly "
+        f"{expected_pwntools_fields!r}, got {source_pwntools_fields!r}"
     )
 
 for index in range(catalog_start + 1, catalog_end):
@@ -279,6 +275,16 @@ else:
             f"pwntools Markdown tool row must have exactly 8 columns: {tool_row!r}"
         )
     else:
+        if tool_row[1] != "reverse-engineering":
+            errors.append(
+                "pwntools Markdown skill must be 'reverse-engineering', "
+                f"got {tool_row[1]!r}"
+            )
+        if tool_row[2] != "CTF pwn 利用开发框架":
+            errors.append(
+                "pwntools Markdown purpose must be 'CTF pwn 利用开发框架', "
+                f"got {tool_row[2]!r}"
+            )
         if tool_row[3] != "yes":
             errors.append(f"pwntools Markdown availability must be 'yes', got {tool_row[3]!r}")
         if os.path.realpath(tool_row[4]) != os.path.realpath(pwn_stub):
@@ -290,6 +296,11 @@ else:
             errors.append(
                 "pwntools Markdown version must be 'Pwntools 4.15.0', "
                 f"got {tool_row[5]!r}"
+            )
+        if tool_row[6] != "command":
+            errors.append(
+                "pwntools Markdown source must be 'command', "
+                f"got {tool_row[6]!r}"
             )
 
 capability_headings = [
@@ -361,6 +372,16 @@ elif have_jq:
             )
         else:
             pwntools = json_matches[0]
+            if pwntools.get("skill") != "reverse-engineering":
+                errors.append(
+                    "pwntools JSON skill must be 'reverse-engineering', "
+                    f"got {pwntools.get('skill')!r}"
+                )
+            if pwntools.get("purpose") != "CTF pwn 利用开发框架":
+                errors.append(
+                    "pwntools JSON purpose must be 'CTF pwn 利用开发框架', "
+                    f"got {pwntools.get('purpose')!r}"
+                )
             if pwntools.get("available") is not True:
                 errors.append("pwntools JSON availability must be true")
             if os.path.realpath(pwntools.get("resolved_path", "")) != os.path.realpath(pwn_stub):
@@ -372,6 +393,11 @@ elif have_jq:
                 errors.append(
                     "pwntools JSON version must be 'Pwntools 4.15.0', "
                     f"got {pwntools.get('version')!r}"
+                )
+            if pwntools.get("source") != "command":
+                errors.append(
+                    "pwntools JSON source must be 'command', "
+                    f"got {pwntools.get('source')!r}"
                 )
 else:
     expected_note = "install jq for full JSON output"
