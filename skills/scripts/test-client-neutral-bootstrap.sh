@@ -166,9 +166,9 @@ data = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 node_records = [tool for tool in data.get("tools", []) if tool.get("name") == "node"]
 if len(node_records) != 1:
     raise SystemExit(f"expected exactly one node JSON record, got {len(node_records)}")
-if node_records[0].get("version") != "—":
+if node_records[0].get("version") is not None:
     raise SystemExit(
-        "empty node version_spec must use the JSON default '—'; "
+        "empty node version_spec expected JSON null; "
         f"got {node_records[0].get('version')!r}"
     )
 PY
