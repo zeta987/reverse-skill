@@ -534,4 +534,44 @@ for manifest_path in sys.argv[1:]:
         )
 PY
 
+# The bootstrap preflight must use the executable supplied by pwntools (`pwn`),
+# not the logical capability name (`pwntools`). Keep pip fully isolated: this
+# stub records any attempted invocation and never calls the host package manager
+# or the network.
+PIP_MARKER="$SCRATCH/pip3-invoked"
+cat > "$BIN_DIR/pip3" <<'STUB'
+#!/bin/bash
+: "${PIP_MARKER:?PIP_MARKER must be set}"
+printf '%q ' "$@" > "$PIP_MARKER"
+printf '\n' >> "$PIP_MARKER"
+exit 0
+STUB
+chmod +x "$BIN_DIR/pip3"
+
+set +e
+bootstrap_output="$(
+    cd "$WORK_DIR"
+    env PATH="$BIN_DIR" HOME="$HOME_DIR" PIP_MARKER="$PIP_MARKER" \
+        "$REAL_BASH" "$BOOTSTRAP" pwntools --skip-refresh 2>&1
+)"
+bootstrap_status=$?
+set -e
+
+if [[ -e "$PIP_MARKER" ]]; then
+    pip_argv="$(<"$PIP_MARKER")"
+    echo "bootstrap invoked pip3 even though pwn is available: $pip_argv" >&2
+    exit 1
+fi
+if [[ $bootstrap_status -ne 0 ]]; then
+    echo "bootstrap failed even though pwn is available (exit $bootstrap_status)" >&2
+    printf '%s\n' "$bootstrap_output" >&2
+    exit 1
+fi
+if [[ "$bootstrap_output" != *"pwntools 已可用"* && \
+      "$bootstrap_output" != *"✓ pwntools"* ]]; then
+    echo "bootstrap did not report pwntools as already available or ready" >&2
+    printf '%s\n' "$bootstrap_output" >&2
+    exit 1
+fi
+
 echo "Kali pwntools discovery regression passed"
