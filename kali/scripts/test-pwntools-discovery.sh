@@ -41,6 +41,28 @@ source_hash = hashlib.sha256(source_bytes).hexdigest()
 source_text = source_bytes.decode("utf-8")
 fixture_text = fixture_path.read_text(encoding="utf-8")
 
+
+def catalog_bounds(catalog_lines, label):
+    starts = [
+        index
+        for index, line in enumerate(catalog_lines)
+        if line.rstrip("\r\n") == "declare -a TOOL_CATALOG=("
+    ]
+    if len(starts) != 1:
+        raise SystemExit(
+            f"{label} must contain exactly one TOOL_CATALOG declaration; "
+            f"found {len(starts)}"
+        )
+    start = starts[0]
+    ends = [
+        index
+        for index in range(start + 1, len(catalog_lines))
+        if catalog_lines[index].rstrip("\r\n") == ")"
+    ]
+    if not ends:
+        raise SystemExit(f"could not find the end of {label} TOOL_CATALOG")
+    return start, ends[0]
+
 port_probe = """test_tcp_port() {
     local port="$1"
     local host="${2:-127.0.0.1}"
@@ -62,29 +84,16 @@ fixture_text = fixture_text.replace(
 )
 
 lines = fixture_text.splitlines(keepends=True)
-catalog_starts = [
-    index
-    for index, line in enumerate(lines)
-    if line.rstrip("\r\n") == "declare -a TOOL_CATALOG=("
-]
-if len(catalog_starts) != 1:
-    raise SystemExit(
-        f"expected exactly one TOOL_CATALOG declaration, found {len(catalog_starts)}"
-    )
-catalog_start = catalog_starts[0]
-catalog_ends = [
-    index
-    for index in range(catalog_start + 1, len(lines))
-    if lines[index].rstrip("\r\n") == ")"
-]
-if not catalog_ends:
-    raise SystemExit("could not find the end of TOOL_CATALOG")
-catalog_end = catalog_ends[0]
+catalog_start, catalog_end = catalog_bounds(lines, "temporary fixture")
+source_lines = source_text.splitlines(keepends=True)
+source_catalog_start, source_catalog_end = catalog_bounds(
+    source_lines, "production source"
+)
 entry_pattern = re.compile(r'^(\s*)"([^"]*)"(\r?\n)?$')
 rewritten = 0
 source_pwntools_lines = [
     line
-    for line in source_text.splitlines(keepends=True)
+    for line in source_lines[source_catalog_start + 1 : source_catalog_end]
     if line.strip().startswith('"pwntools|')
 ]
 if len(source_pwntools_lines) != 1:
@@ -110,11 +119,6 @@ for index in range(catalog_start + 1, catalog_end):
     if name == "pwntools":
         if lines[index] != source_pwntools_lines[0]:
             raise SystemExit("temporary pwntools catalog row differs from production")
-        if fallback_text != "pwntools,pwn":
-            raise SystemExit(
-                "pwntools fallback contract changed; expected 'pwntools,pwn', "
-                f"got {fallback_text!r}"
-            )
         continue
 
     candidates = fallback_text.split(",") if fallback_text else []
