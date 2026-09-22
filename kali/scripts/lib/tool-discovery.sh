@@ -161,7 +161,11 @@ get_tool_version() {
     fi
 
     local output
-    output=$("$cmd" $version_args 2>&1 | head -n1) || true
+    if [[ "${cmd##*/}" == "pwn" && "$version_args" == "version" ]]; then
+        output=$(PWNLIB_NOTERM=1 "$cmd" version 2>&1 | head -n1) || true
+    else
+        output=$("$cmd" $version_args 2>&1 | head -n1) || true
+    fi
     echo "$output"
 }
 

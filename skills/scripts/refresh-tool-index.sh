@@ -33,7 +33,11 @@ run_version() {
     echo ""
     return 0
   fi
-  "$cmd" "$@" 2>&1 | head -n 1 | tr '\n' ' ' | sed 's/[[:space:]]*$//' || true
+  if [[ "$cmd" == "pwn" && "$#" -eq 1 && "${1-}" == "version" ]]; then
+    PWNLIB_NOTERM=1 "$cmd" "$@" 2>&1 | head -n 1 | tr '\n' ' ' | sed 's/[[:space:]]*$//' || true
+  else
+    "$cmd" "$@" 2>&1 | head -n 1 | tr '\n' ' ' | sed 's/[[:space:]]*$//' || true
+  fi
 }
 
 file_exists_any() {
@@ -188,7 +192,7 @@ for entry in "${TOOLS[@]}"; do
     done
   fi
 
-  if [[ "$version_spec" != "none" ]]; then
+  if [[ -n "$version_spec" && "$version_spec" != "none" ]]; then
     read -r -a version_parts <<< "$version_spec"
     if has_cmd "${version_parts[0]}"; then
       version="$(run_version "${version_parts[@]}")"
