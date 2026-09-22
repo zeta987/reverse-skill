@@ -407,6 +407,7 @@ import sys
 
 lines = sys.argv[1].splitlines()
 section_pattern = re.compile(r"^\s*\[([^]]+)\]\s*$")
+allowed_section_title = "逆向分析"
 allowed_sections = []
 
 for index, line in enumerate(lines):
@@ -414,7 +415,7 @@ for index, line in enumerate(lines):
     if heading is None:
         continue
     title = heading.group(1)
-    if "逆向" not in title and "ctf" not in title.casefold():
+    if title != allowed_section_title:
         continue
     section_end = len(lines)
     for candidate in range(index + 1, len(lines)):
@@ -432,7 +433,7 @@ if not matching_sections:
     inspected = [title for title, _ in allowed_sections]
     raise SystemExit(
         "bootstrap human help must include the complete token 'pwntools' inside "
-        "a CTF/reverse-analysis section before the next section heading; "
+        f"the [{allowed_section_title}] section before the next section heading; "
         f"inspected sections: {inspected!r}"
     )
 PY
