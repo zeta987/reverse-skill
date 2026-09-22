@@ -76,5 +76,5 @@ Create a merge commit whose second parent is the original #144 head, preserving 
 ## Failure handling
 
 - A missing `pwn` command must produce an unavailable pwntools record without aborting refresh.
-- A failing `pwn version` command may leave the version empty, consistent with existing discovery behaviour, but detection remains based on executable presence.
+- A failing `pwn version` command may leave the version empty or record its first stderr diagnostic line, consistent with existing non-blocking discovery behaviour, but detection remains based on executable presence.
 - Any CI failure blocks integration into `main`.
