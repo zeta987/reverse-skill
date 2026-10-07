@@ -273,8 +273,8 @@
 | idapro | 13337-13350 | IDA Pro 72 个逆向工具 | 自动启动（IDA 插件），多实例端口递增 |
 | anything-analyzer | 23816 | 浏览器自动化 + HTTP 捕获 | `pnpm dev`（项目目录） |
 | jshookmcp | — | JS Hook/CDP/Network/AST | `npx -y @jshookmcp/jshook@0.3.4`（stdio） |
-| ghidra | 8765 | Ghidra 免费反编译 | Ghidra GUI 启动后自动监听 |
-| burpsuite | 9876 | BurpSuite 78 工具全控制（Proxy/Intruder/Repeater/Scanner/Collaborator） | Burp 启动后扩展自动加载 |
+| Ghidra-mcp | 8192 起（REST） | Ghidra 免费反编译（GhydraMCP 用户扩展） | CodeBrowser 启用插件；客户端经 stdio 桥接 `skills/scripts/mcp/ghydra-stdio.py --bridge <bridge_mcp_hydra.py>`（见 `docs/mcp/README.md`） |
+| burpsuite | 9876（HTTP API） | BurpSuite 78 工具全控制（Proxy/Intruder/Repeater/Scanner/Collaborator） | Burp 加载 `burp-mcp-full.jar`；客户端经 stdio 桥接 `node burp-mcp-full/mcp-bridge.js` |
 
 使用 MCP 工具前：
 1. 先确认 `tool-index.md` 中该服务的 `MCP 已注册` 状态

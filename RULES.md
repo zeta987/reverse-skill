@@ -204,8 +204,8 @@ After task completion (vulnerability verified / reverse complete / flag captured
 | idapro | 13337-13350 | IDA Pro 72 reverse tools | Auto-start (IDA plugin), port increments per instance |
 | anything-analyzer | 23816 | Browser automation + HTTP capture | `pnpm dev` (project dir) |
 | jshookmcp | — | JS Hook/CDP/Network/AST | `npx -y @jshookmcp/jshook@0.3.4` (stdio) |
-| ghidra | 8765 | Ghidra free decompiler | Ghidra GUI auto-listens after launch |
-| burpsuite | 9876 | BurpSuite 78-tool full control (Proxy/Intruder/Repeater/Scanner/Collaborator) | Burp extension auto-loads |
+| Ghidra-mcp | 8192+ (REST) | Ghidra free decompiler via GhydraMCP user extension | CodeBrowser with the plugin enabled; clients use the stdio bridge `skills/scripts/mcp/ghydra-stdio.py --bridge <bridge_mcp_hydra.py>` (see `docs/mcp/README.md`) |
+| burpsuite | 9876 (HTTP API) | BurpSuite 78-tool full control (Proxy/Intruder/Repeater/Scanner/Collaborator) | Burp loads `burp-mcp-full.jar`; clients use the stdio bridge `node burp-mcp-full/mcp-bridge.js` |
 
 ---
 

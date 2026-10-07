@@ -73,7 +73,8 @@
       "postInstallSteps": [
         "ida-pro-mcp --install (选择 Streamable HTTP + Global)",
         "重启 IDA Pro 使插件生效",
-        "IDA 打开文件后 MCP 自动监听 127.0.0.1:13337"
+        "IDA 打开文件后 MCP 自动监听 127.0.0.1:13337",
+        "无 GUI 的 headless 后端用 skills/scripts/mcp/start-local-backend.ps1 -Backend Ida（ida_pro_mcp.idalib_server，需要 IDADIR）；ida-pro-mcp 2.0.0 没有 idalib_supervisor 模块"
       ]
     },
     {
@@ -238,18 +239,21 @@
       "canAutoInstall": true,
       "verifyCommand": "analyzeHeadless",
       "postInstallSteps": [
-        "下载 GhidraMCP 插件: https://github.com/LaurieWired/GhidraMCP/releases",
-        "将插件 zip 安装到 Ghidra: File → Install Extensions → 选择下载的 zip",
-        "MCP server 在 Ghidra 项目打开后自动监听 localhost:8765"
+        "安装 GhydraMCP 用户扩展（starsong-consulting/GhydraMCP v2.2.0-rc.2）到 %APPDATA%\\ghidra\\<ghidra_version>\\Extensions\\GhydraMCP；需要环回绑定时按 docs/mcp/patches/ghydra-v2.2.0-rc2-loopback.patch 重新构建 JAR 并记录原始 JAR 哈希",
+        "在 CodeBrowser 中启用 GhydraMCP 插件；插件为 REST HTTP（从 8192 起逐实例递增），不是 Streamable HTTP MCP 端点",
+        "MCP 客户端以 stdio 注册：<bridge-python> skills/scripts/mcp/ghydra-stdio.py --bridge <bridge_mcp_hydra.py>，env GHIDRA_HYDRA_HOST=127.0.0.1；桥接路径依本机安装，由 Agent 解析后写入项目级客户端配置（见 docs/mcp/README.md）",
+        "按案例用 skills/scripts/mcp/start-ghidra-project.ps1 打开 .gpr 项目后再做 instances_list / functions_list 验证"
       ],
       "mcpNames": [
+        "Ghidra-mcp",
         "ghidra"
       ],
-      "mcpUrl": "http://localhost:8765/mcp",
-      "servicePort": 8765,
+      "mcpBridgeLauncher": "%SKILL_ROOT%\\scripts\\mcp\\ghydra-stdio.py",
+      "servicePort": 8192,
+      "portNote": "GhydraMCP REST 端口从 8192 起（多实例递增）；旧 LaurieWired GhidraMCP 的 8765 不适用本仓库的桥接",
       "verificationMode": "service-or-registration",
       "preferApiDigest": true,
-      "note": "Ghidra 发版频繁，不 pin assetSha256；改用 GitHub API digest（sha256:...）动态校验，格式已实测兼容 Assert-DownloadedFileIntegrity。"
+      "note": "github-release-zip 只安装 Ghidra 本体（发版频繁，不 pin assetSha256，改用 GitHub API digest 动态校验）。MCP 接入走 GhydraMCP 用户扩展 + skills/scripts/mcp/ghydra-stdio.py 的 stdio 桥接，桥接 Python 与 bridge_mcp_hydra.py 路径依本机安装，故不自动注册。"
     },
     {
       "name": "seclists",
@@ -270,23 +274,26 @@
       "canAutoInstall": true,
       "verifyCommand": "proxycat",
       "postInstallSteps": [
-        "git clone https://github.com/honmashironeko/ProxyCat.git %USERPROFILE%\\Tools\\ProxyCat",
-        "pip install -r %USERPROFILE%\\Tools\\ProxyCat\\requirements.txt",
-        "使用 %USERPROFILE%\\Tools\\bin\\proxycat.bat 启动"
+        "bootstrap 只完成 pinned git checkout；Python 依赖需手动安装（推荐 uv venv --python 3.13 %USERPROFILE%\\Tools\\ProxyCat\\.venv 后 uv pip install -r requirements.txt，或 pip install -r %USERPROFILE%\\Tools\\ProxyCat\\requirements.txt）",
+        "创建 %USERPROFILE%\\Tools\\bin\\proxycat.bat 启动器指向该 venv 的 python 与 ProxyCat.py，并把 %USERPROFILE%\\Tools\\bin 加入 PATH，refresh-tool-index 才能识别 proxycat"
       ]
     },
     {
       "name": "burpsuite-mcp",
-      "bootstrapKind": "local-http-mcp",
+      "bootstrapKind": "local-stdio-mcp",
       "mcpNames": [
         "burpsuite"
       ],
-      "mcpUrl": "http://localhost:9876/mcp",
+      "mcpCommand": "node",
+      "mcpArgs": [
+        "%REPO_ROOT%\\burp-mcp-full\\mcp-bridge.js"
+      ],
       "servicePort": 9876,
+      "portNote": "9876 是 burp-mcp-full 扩展的自定义 HTTP API（/health、/tools、POST /），不是 MCP 端点；MCP 客户端通过 node mcp-bridge.js 的 stdio 桥接访问",
       "docsUrl": "https://portswigger.net/burp",
       "canAutoInstall": false,
       "verificationMode": "service-or-registration",
-      "manualInstallHint": "在 BurpSuite 扩展市场搜索 MCP 插件安装，启动后监听 localhost:9876"
+      "manualInstallHint": "构建 burp-mcp-full（build.bat / build.sh）并在 Burp → Extensions → Add → Java 加载 build/libs/burp-mcp-full.jar；Output 出现 [MCP] Server started on http://127.0.0.1:9876 后，MCP 客户端以 stdio 注册 node <repo>/burp-mcp-full/mcp-bridge.js（见 burp-mcp-full/README.md）"
     },
     {
       "name": "nmap",
@@ -319,12 +326,13 @@
     },
     {
       "name": "binwalk",
-      "bootstrapKind": "winget-package",
-      "wingetId": "ReFirmLabs.binwalk",
-      "pinPolicy": "winget-latest",
+      "bootstrapKind": "cargo-install",
+      "cargoCrate": "binwalk",
+      "pinnedVersion": "3.1.0",
       "docsUrl": "https://github.com/ReFirmLabs/binwalk",
       "canAutoInstall": true,
-      "verifyCommand": "binwalk"
+      "verifyCommand": "binwalk",
+      "note": "winget 没有 ReFirmLabs.binwalk 包；binwalk v3 以 crate 发布，cargo install --locked binwalk --version 3.1.0 已在 Windows 实测（需要已安装 Rust/cargo）。"
     },
     {
       "name": "yara",
@@ -340,9 +348,11 @@
       "bootstrapKind": "pip-package",
       "pipPackage": "pwntools==4.15.0",
       "pinnedVersion": "4.15.0",
+      "uvPython": "3.13",
       "docsUrl": "https://github.com/Gallopsled/pwntools",
       "canAutoInstall": true,
-      "verifyCommand": "pwntools"
+      "verifyCommand": "pwn",
+      "note": "控制台入口是 pwn（没有名为 pwntools 的可执行文件）。pwntools 4.15.0 依赖的 unicorn 没有 CPython 3.14 wheel，本地 cmake 构建失败；有 uv 时用 uv tool install --python 3.13 安装到隔离环境（pwn 出现在 %USERPROFILE%\\.local\\bin），没有 uv 才退回系统 pip。"
     },
     {
       "name": "bkcrack",

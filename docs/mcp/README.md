@@ -99,8 +99,10 @@ The local GhydraMCP v2.2.0 bridge reads `GHIDRA_HYDRA_HOST` and starts discovery
 at 8192; it does **not** parse a positional `http://127.0.0.1:13337` argument.
 Remove that argument. Its quick range covers ten ports, while its broader
 discovery supports more instances. Select the discovered instance explicitly.
-The older LaurieWired integration mentioned elsewhere in the bootstrap
-manifest uses a different API/port convention; it is not this Hydra bridge.
+The older LaurieWired GhidraMCP integration (HTTP MCP on 8765) uses a different
+API/port convention; it is not this Hydra bridge, and the bootstrap manifest's
+`ghidra-mcp` entry now describes the GhydraMCP path (user extension, optional
+loopback patch, `ghydra-stdio.py` stdio bridge, REST from 8192).
 
 This GhydraMCP release binds its HTTP server with `InetSocketAddress(port)`,
 which was observed as wildcard `::` on Windows. The bridge's host environment
