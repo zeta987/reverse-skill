@@ -93,7 +93,7 @@ description: |
 路径：`scripts/start.ps1`
 
 - 自动解析 `IDADIR`（环境变量 / 便携版桌面路径 / 常见安装路径）
-- 优先用 IDA 自带 `Python314\python.exe -m ida_pro_mcp.idalib_supervisor`
+- 优先用 IDA 自带 `Python314\python.exe -m <后端模块>`：按解释器探测 `ida_pro_mcp.idalib_supervisor`，ida-pro-mcp 2.0.0 没有该模块时回退 `ida_pro_mcp.idalib_server`（2.0.0 主机推荐直接用 `skills/scripts/mcp/start-local-backend.ps1 -Backend Ida`）
 - 默认先探测 `http://127.0.0.1:13337/mcp`，健康则输出 `OK:<n>:reuse` 并退出
 - 13337 在听但 `tools/list` 超时 → `WARN:busy` / `OK:busy:reuse`，**不杀**（开库或 GUI 占用时无法回包）
 - `tools/list` **连续失败超过 3 分钟**（last-healthy 时间戳）且无 `opening.lock` → 视为死锁，输出 `INFO:deadlock` 并 `-Force` 替换 supervisor。进行中的 `idb_open` 和 GUI 不会走这条路径

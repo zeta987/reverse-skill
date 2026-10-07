@@ -4,11 +4,17 @@ Start IDA Pro MCP HTTP server (background, non-blocking)
 
 .DESCRIPTION
 1. Resolve IDADIR (env / portable IDA / registry / common paths)
-2. Resolve idalib-mcp (PATH, IDA Python314 Scripts, or python -m)
+2. Resolve the backend: python -m ida_pro_mcp.idalib_supervisor where that module
+   exists, otherwise ida-pro-mcp 2.0.0's ida_pro_mcp.idalib_server; else the
+   idalib-mcp / ida-pro-mcp console scripts
 3. If HTTP already healthy, reuse it (unless -Force)
-4. Otherwise kill stale listeners and start a logged supervisor
+4. Otherwise kill stale managed listeners and start a logged backend
 5. Wait for service ready (max 30 seconds)
 6. Output OK:<tool_count>, OK:<tool_count>:reuse, or ERR:...
+
+For a resolved interpreter + IDA directory without keep-alive/watchdog semantics,
+skills\scripts\mcp\start-local-backend.ps1 -Backend Ida is the supported entry point
+on ida-pro-mcp 2.0.0 hosts (see skills\ida-reverse\LOCAL-SETUP.md).
 
 Usage: run without parameters
 #>
@@ -112,26 +118,32 @@ function Test-IdaGuiProcess {
     return [string]$proc.Name -match '(?i)^(ida|ida64|idaq|idaq64)\.exe$'
 }
 
-function Test-ManagedSupervisorProcess {
-    param([int]$ProcessId)
-    $proc = Get-IdaMcpProcessInfo -ProcessId $ProcessId
-    if (-not $proc) { return $false }
-    $name = [string]$proc.Name
-    $cmd = [string]$proc.CommandLine
+function Test-ManagedSupervisorProcessInfo {
+    # Pure in-memory classification of an already-fetched Win32_Process row.
+    param($Process)
+    if (-not $Process) { return $false }
+    $name = [string]$Process.Name
+    $cmd = [string]$Process.CommandLine
     if ($name -match '(?i)^(ida|ida64|idaq|idaq64)\.exe$') { return $false }
     if ($name -match '(?i)^(python|pythonw|cmd)\.exe$') {
-        return $cmd -match '(?i)(run-supervisor\.py|idalib_supervisor|idalib-mcp|ida-pro-mcp)'
+        return $cmd -match '(?i)(run-supervisor\.py|idalib_supervisor|idalib_server|idalib-mcp|ida-pro-mcp)'
     }
-    return $name -match '(?i)^(idalib-mcp|ida-pro-mcp|idalib_supervisor)'
+    return $name -match '(?i)^(idalib-mcp|ida-pro-mcp|idalib_supervisor|idalib_server)'
+}
+
+function Test-ManagedSupervisorProcess {
+    param([int]$ProcessId)
+    return Test-ManagedSupervisorProcessInfo -Process (Get-IdaMcpProcessInfo -ProcessId $ProcessId)
 }
 
 function Get-ManagedSupervisorProcessIds {
+    # One Win32_Process enumeration, filtered in memory. The previous version issued a
+    # second WMI query per process (hundreds of RPCs) and could stall for many minutes.
     $ids = New-Object System.Collections.Generic.List[int]
     foreach ($proc in @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)) {
         if (-not $proc.ProcessId) { continue }
-        $candidateId = [int]$proc.ProcessId
-        if (Test-ManagedSupervisorProcess -ProcessId $candidateId) {
-            [void]$ids.Add($candidateId)
+        if (Test-ManagedSupervisorProcessInfo -Process $proc) {
+            [void]$ids.Add([int]$proc.ProcessId)
         }
     }
     return @($ids | Select-Object -Unique)
@@ -227,10 +239,19 @@ function Resolve-IdaDir {
     return $null
 }
 
-function Test-PythonHasIdaProMcp {
+$script:IdaProMcpBackendModules = @('ida_pro_mcp.idalib_supervisor', 'ida_pro_mcp.idalib_server')
+
+function Get-IdaProMcpBackendModule {
+    <#
+    Returns the headless backend module the given interpreter can run:
+      ida_pro_mcp.idalib_supervisor  (older ida-pro-mcp builds with idb_open/idb_list)
+      ida_pro_mcp.idalib_server      (ida-pro-mcp 2.0.0: idalib_open/idalib_list, default port 8745)
+    or '' when ida_pro_mcp is missing. Detection uses importlib.util.find_spec so no IDA
+    library is loaded while probing.
+    #>
     param([string]$PythonExe)
     if ([string]::IsNullOrWhiteSpace($PythonExe) -or -not (Test-Path -LiteralPath $PythonExe)) {
-        return $false
+        return ''
     }
     # pythonw.exe has no console — probe with sibling python.exe when possible
     $probeExe = $PythonExe
@@ -238,12 +259,28 @@ function Test-PythonHasIdaProMcp {
         $sibling = Join-Path (Split-Path $PythonExe -Parent) 'python.exe'
         if (Test-Path -LiteralPath $sibling) { $probeExe = $sibling }
     }
+    # Single quotes only: Windows PowerShell 5.1 strips embedded double quotes from native arguments.
+    $probe = @(
+        'import importlib.util as u',
+        "mods = [$(($script:IdaProMcpBackendModules | ForEach-Object { "'$_'" }) -join ', ')]",
+        "found = [m for m in mods if u.find_spec(m) is not None] if u.find_spec('ida_pro_mcp') else []",
+        "print(found[0] if found else '')"
+    ) -join '; '
     try {
-        $check = & $probeExe -c "import ida_pro_mcp; print('ok')" 2>$null
-        return ($LASTEXITCODE -eq 0) -or ($check -match 'ok')
+        # No -I: ida_pro_mcp is commonly a user-site install (%APPDATA%\Python\...), which isolated mode hides.
+        $output = @(& $probeExe -c $probe 2>$null)
+        if ($LASTEXITCODE -ne 0) { return '' }
+        $module = ([string]($output | Select-Object -Last 1)).Trim()
+        if ($module -in $script:IdaProMcpBackendModules) { return $module }
+        return ''
     } catch {
-        return $false
+        return ''
     }
+}
+
+function Test-PythonHasIdaProMcp {
+    param([string]$PythonExe)
+    return -not [string]::IsNullOrWhiteSpace((Get-IdaProMcpBackendModule -PythonExe $PythonExe))
 }
 
 function Get-WindowlessPythonPath {
@@ -267,7 +304,9 @@ function Find-IdalibServer {
         return @{ Mode = 'exe'; Path = $PreferredServerPath }
     }
 
-    # Prefer direct `pythonw -m ida_pro_mcp.idalib_supervisor` (no console window; more stable than .cmd)
+    # Prefer a direct `pythonw -m <backend module>` launch (no console window; more stable
+    # than .cmd). The module is detected per interpreter: idalib_supervisor where it exists,
+    # otherwise ida-pro-mcp 2.0.0's idalib_server.
     $pythonCandidates = @(
         (Join-Path $IdaDirPath 'Python314\pythonw.exe'),
         (Join-Path $IdaDirPath 'Python314\python.exe'),
@@ -286,9 +325,10 @@ function Find-IdalibServer {
     foreach ($py in $pythonCandidates) {
         # `py` launcher is not a real interpreter for -m in Start-Process; skip bare py.exe
         if ($py -match '\\py\.exe$') { continue }
-        if (Test-PythonHasIdaProMcp -PythonExe $py) {
+        $module = Get-IdaProMcpBackendModule -PythonExe $py
+        if (-not [string]::IsNullOrWhiteSpace($module)) {
             $launch = Get-WindowlessPythonPath -PythonExe $py
-            return @{ Mode = 'module'; Path = $launch; Module = 'ida_pro_mcp.idalib_supervisor' }
+            return @{ Mode = 'module'; Path = $launch; Module = $module }
         }
     }
 
@@ -336,6 +376,11 @@ function Find-IdalibServer {
     }
 
     return $null
+}
+
+# Dot-sourced by tests with -FunctionsOnly semantics: stop before touching the host.
+if ($MyInvocation.InvocationName -eq '.' -and $env:REVERSE_IDA_START_FUNCTIONS_ONLY -eq '1') {
+    return
 }
 
 $probe = Probe-IdaMcp -Port $Port
@@ -445,6 +490,7 @@ $logFile = Join-Path $logDir 'supervisor.log'
 Rotate-IdaMcpLog -Path $logFile
 
 Write-Output "INFO:IDADIR=$IdaDir"
+if ($server.Mode -eq 'module') { Write-Output "INFO:module=$($server.Module)" }
 Write-Output "INFO:server=$filePath $($argList -join ' ')"
 Write-Output "INFO:log=$logFile"
 Write-Output 'INFO:window=hidden (pythonw / no console)'

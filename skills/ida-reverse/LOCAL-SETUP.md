@@ -6,9 +6,16 @@
 
 Windows Codex / 本机 dsh web 先读 [MCP 客户端与后端指南](../../docs/mcp/README.md)。
 本页后续的 `idb_open` / `idalib_supervisor` 示例适用于提供这些 API 的版本。
-旧版安装可能只有 `idalib_open` / `idalib_list` 与 `ida_pro_mcp.idalib_server`；
+ida-pro-mcp 2.0.0 只有 `idalib_open` / `idalib_list` 与 `ida_pro_mcp.idalib_server`，**没有 `idalib_supervisor`**；
 先检查实际模块与 `tools/list`，不得直接套用不匹配的 `open.ps1`。
-`start-local-backend.ps1 -Backend Ida` 可按已解析的 Python / IDA 路径启动或复用该旧版 headless 后端。
+
+| 版本形态 | 支持的启动路径 |
+|------|------|
+| ida-pro-mcp 2.0.0（只有 `idalib_server`） | **`skills/scripts/mcp/start-local-backend.ps1 -Backend Ida -Executable <python> -IdaDir <IDADIR> -LogDir <dir>`**：探测真实 API、复用健康后端、记录 PID；成功即退出（输出含 `elapsed_ms`）。`scripts/start.ps1` 也能用：它按解释器探测模块，没有 supervisor 时回退到 `idalib_server --host 127.0.0.1 --port 13337 --unsafe`（默认端口 8745，必须显式传 `--port`） |
+| 旧版（有 `idalib_supervisor` / `idb_open`） | `scripts/start.ps1` → `python -m ida_pro_mcp.idalib_supervisor`，配合 `watchdog.ps1` / `install-autostart.ps1` 保活 |
+
+`watchdog.ps1` 与 `install-autostart.ps1` 只是调用 `start.ps1`，因此同样继承模块探测与单次 `Win32_Process` 列举（旧版每个进程各查一次 WMI，可能卡住十几分钟）。
+IDA GUI 插件的 `init()` 也可能仅登记热键，须确认调用插件后服务真的监听，不能从“插件存在”推定自动启动。
 IDA GUI 插件的 `init()` 也可能仅登记热键，须确认调用插件后服务真的监听，不能从“插件存在”推定自动启动。
 
 ## 目标形态
@@ -72,6 +79,6 @@ GUI 占用 13337 但一时没回包时，`start.ps1` 输出 `WARN:gui_busy` 并�
 
 1. System32 文件：`open.ps1` 会复制到临时路径（输出带 `(temp copy)`）
 2. `idb_open` 勿经部分客户端 MCP 直调
-3. `start.ps1` 优先 `python -m ida_pro_mcp.idalib_supervisor`，比 `.cmd` 包装更稳
+3. `start.ps1` 优先 `python -m <探测到的后端模块>`（`idalib_supervisor`，否则 2.0.0 的 `idalib_server`），比 `.cmd` 包装更稳；输出 `INFO:module=...` 标明实际模块
 4. 正式安装与桌面便携包并存时，以 `IDADIR` 为准
 5. 不要加 `?ext=dbg`（默认不暴露调试器工具）

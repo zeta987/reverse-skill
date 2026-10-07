@@ -20,14 +20,38 @@ function Test-BackendPort {
     catch { return $false }
     finally { $client.Dispose() }
 }
+function Invoke-LoopbackJson {
+    # Direct HttpWebRequest with no proxy: Windows PowerShell 5.1's Invoke-RestMethod can
+    # spend seconds per call on proxy auto-detection even for 127.0.0.1, and this probe
+    # runs every 400 ms during startup.
+    param([string]$Uri, [string]$Method = 'GET', [string]$Body = '', [int]$TimeoutMs = 2000)
+    $req = [Net.HttpWebRequest]::Create($Uri)
+    $req.Method = $Method
+    $req.Proxy = $null
+    $req.Timeout = $TimeoutMs
+    $req.ReadWriteTimeout = $TimeoutMs
+    $req.Accept = 'application/json'
+    if ($Method -eq 'POST') {
+        $bytes = [Text.Encoding]::UTF8.GetBytes($Body)
+        $req.ContentType = 'application/json'
+        $req.ContentLength = $bytes.Length
+        $stream = $req.GetRequestStream()
+        try { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
+    }
+    $resp = $req.GetResponse()
+    try {
+        $reader = [IO.StreamReader]::new($resp.GetResponseStream())
+        try { return ($reader.ReadToEnd() | ConvertFrom-Json) } finally { $reader.Dispose() }
+    } finally { $resp.Dispose() }
+}
 function Get-BackendHealth {
     try {
         if ($Backend -eq 'Ida') {
-            $reply = Invoke-RestMethod "http://127.0.0.1:$Port/mcp" -Method Post -ContentType 'application/json' -Body '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' -TimeoutSec 2
+            $reply = Invoke-LoopbackJson -Uri "http://127.0.0.1:$Port/mcp" -Method Post -Body '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
             $names = @($reply.result.tools | ForEach-Object name)
             if ($names -contains 'decompile' -and $names -contains 'list_funcs') { return @{tool_count=$names.Count} }
         } else {
-            $reply = Invoke-RestMethod "http://127.0.0.1:$Port/Is_Debugging" -TimeoutSec 2
+            $reply = Invoke-LoopbackJson -Uri "http://127.0.0.1:$Port/Is_Debugging"
             if ($reply.PSObject.Properties.Name -contains 'isDebugging' -and $reply.isDebugging -is [bool]) { return @{is_debugging=$reply.isDebugging} }
         }
     } catch { }
@@ -58,6 +82,7 @@ function Test-StartedProcessOwner([int]$Owner, [int]$Launcher) {
     return $false
 }
 
+$scriptClock = [Diagnostics.Stopwatch]::StartNew()
 $startupMutex = [Threading.Mutex]::new($false, "Local\reverse-skill-$Backend-$Port")
 $lockAcquired = $false
 try {
@@ -68,7 +93,7 @@ try {
 if (Test-BackendPort) {
     $health = Get-BackendHealth
     if (-not $health) { throw "Port $Port is occupied but the expected $Backend API is unavailable or busy; existing processes were preserved." }
-    @{backend=$Backend;pid=(Get-ListenerPid);port=$Port;reused=$true;health=$health} | ConvertTo-Json -Depth 4
+    @{backend=$Backend;pid=(Get-ListenerPid);port=$Port;reused=$true;health=$health;elapsed_ms=$scriptClock.ElapsedMilliseconds} | ConvertTo-Json -Depth 4
     exit 0
 }
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
@@ -95,7 +120,7 @@ do {
     if ($health) {
         $owner = Get-ListenerPid
         if (-not (Test-StartedProcessOwner -Owner $owner -Launcher $process.Id)) { throw "Port $Port is owned by a different process; startup was not confirmed." }
-        @{backend=$Backend;pid=$owner;launcher_pid=$process.Id;port=$Port;reused=$false;health=$health;log_dir=$LogDir} | ConvertTo-Json -Depth 4
+        @{backend=$Backend;pid=$owner;launcher_pid=$process.Id;port=$Port;reused=$false;health=$health;log_dir=$LogDir;elapsed_ms=$scriptClock.ElapsedMilliseconds} | ConvertTo-Json -Depth 4
         exit 0
     }
     Start-Sleep -Milliseconds 400

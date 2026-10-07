@@ -68,7 +68,7 @@ Register-ScheduledTask `
     -Settings $settings `
     -Principal $principal `
     -Force `
-    -Description 'Keep IDA Pro MCP HTTP (127.0.0.1:13337) alive. Reuses a healthy server; starts idalib_supervisor only when down.' `
+    -Description 'Keep IDA Pro MCP HTTP (127.0.0.1:13337) alive. Reuses a healthy server; starts the detected idalib backend (idalib_supervisor or idalib_server) only when down.' `
     | Out-Null
 
 Start-ScheduledTask -TaskName $taskName
