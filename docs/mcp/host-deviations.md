@@ -28,7 +28,7 @@ Status after the 2026-10-08 fork fixes (branch `dev/windows-mcp-clients`):
 | binwalk | manifest `bootstrapKind: cargo-install`, `cargoCrate: binwalk`, `pinnedVersion: 3.1.0`; bootstrap runs `cargo install --locked binwalk --version 3.1.0`, tool index probes `~\.cargo\bin\binwalk.exe` |
 | pwntools | `verifyCommand: pwn`, `uvPython: "3.13"`; bootstrap prefers `uv tool install --python 3.13 pwntools==4.15.0`, index probes `~\.local\bin\pwn.exe` |
 | bkcrack | `Expand-ArchiveIntoDirectory` wraps `Get-ChildItem` in `@()`; the single-top-directory zip now extracts under `Set-StrictMode` |
-| seclists | `Ensure-GitCloneInstall` runs `git -c core.autocrlf=false` for init/fetch/checkout/status and persists `core.autocrlf=false` in the checkout. The existing host checkout stays dirty because Defender removed 11 payload files; do not restore them |
+| seclists | `Ensure-GitCloneInstall` runs `git -c core.autocrlf=false` for init/fetch/checkout/status and persists `core.autocrlf=false` in the checkout. The existing host checkout stays dirty (16 status entries with and without the flag) because Defender removed payload files; do not restore them. The existing ProxyCat checkout reports clean both ways, so older checkouts are not regressed by the flag |
 | proxycat | `postInstallSteps` are now emitted as `[post-install]` warnings and in the results JSON (`post_install_steps`); the dependency install itself is still manual |
 | anything-analyzer | `Test-VsBuildToolsInstalled` asks `vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64` first, so VS 2026 Community counts |
 | idapro (HTTP) | unchanged: still a second alias of the stdio-proxied backend |

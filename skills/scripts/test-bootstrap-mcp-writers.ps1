@@ -107,14 +107,35 @@ try {
 
     $settings = Get-Content -LiteralPath $env:CLAUDE_SETTINGS_LOCAL -Raw -Encoding UTF8 | ConvertFrom-Json
     Assert-True (@($settings.enabledMcpjsonServers) -contains 'jshook' -and @($settings.enabledMcpjsonServers) -contains 'xquik') 'Claude: settings.local.json enabledMcpjsonServers lists the servers'
-    # Re-registering must not duplicate the approval entry, and unrelated settings survive.
+    # Re-registering must not duplicate the approval entry, and unrelated settings survive a
+    # real rewrite (registering a NEW server), including one-element arrays.
     $settingsMap = Read-ReverseJsonAsHashtable -Path $env:CLAUDE_SETTINGS_LOCAL
-    $settingsMap['permissions'] = @{ allow = @('Bash(git status)') }
+    $settingsMap['permissions'] = @{ allow = @('Bash(git status)'); deny = @() }
     ($settingsMap | ConvertTo-Json -Depth 10) | Set-Content -LiteralPath $env:CLAUDE_SETTINGS_LOCAL -Encoding utf8
     Ensure-McpServer -ServerName 'jshook' -ServerDefinition $stdioDefinition
-    $settings = Get-Content -LiteralPath $env:CLAUDE_SETTINGS_LOCAL -Raw -Encoding UTF8 | ConvertFrom-Json
+    Ensure-McpServer -ServerName 'math-mcp' -ServerDefinition @{ command = 'C:\Program Files\nodejs\node.exe'; args = @('D:\WIN_MCP\math-mcp\build\index.js') }
+    $settingsText = Get-Content -LiteralPath $env:CLAUDE_SETTINGS_LOCAL -Raw -Encoding UTF8
+    $settings = $settingsText | ConvertFrom-Json
     Assert-True (@(@($settings.enabledMcpjsonServers) | Where-Object { $_ -eq 'jshook' }).Count -eq 1) 'Claude: enabledMcpjsonServers is idempotent'
-    Assert-True ($settings.permissions.allow[0] -eq 'Bash(git status)') 'Claude: unrelated settings.local.json keys are preserved'
+    Assert-True (@($settings.enabledMcpjsonServers) -contains 'math-mcp') 'Claude: newly registered server is approved'
+    Assert-True ($settings.permissions.allow[0] -eq 'Bash(git status)' -and $settingsText -match '"allow":\s*\[') 'Claude: one-element permissions.allow stays an array after rewrite'
+    Assert-True ($settingsText -match '"deny":\s*\[\s*\]') 'Claude: empty permissions.deny stays an empty array after rewrite'
+
+    # The verified host .mcp.json has a one-element args (math-mcp) and an empty args (r2mcp);
+    # both must survive a read-modify-write of an unrelated server.
+    $claudeText = Get-Content -LiteralPath $env:CLAUDE_MCP_CONFIG -Raw -Encoding UTF8
+    Assert-True ($claudeText -match '"args":\s*\[\s*"D:\\\\WIN_MCP\\\\math-mcp\\\\build\\\\index\.js"\s*\]') 'Claude: one-element args is written as an array'
+    Ensure-McpServer -ServerName 'r2mcp' -ServerDefinition @{ command = 'D:\tools\r2mcp.exe'; args = @() }
+    Ensure-McpServer -ServerName 'probe' -ServerDefinition @{ url = 'http://127.0.0.1:1/mcp' }
+    $claude = Get-Content -LiteralPath $env:CLAUDE_MCP_CONFIG -Raw -Encoding UTF8 | ConvertFrom-Json
+    $claudeText = Get-Content -LiteralPath $env:CLAUDE_MCP_CONFIG -Raw -Encoding UTF8
+    Assert-True ($claude.mcpServers.'math-mcp'.args -is [array] -and @($claude.mcpServers.'math-mcp'.args).Count -eq 1) 'Claude: one-element args survives a later rewrite as an array'
+    Assert-True ($claudeText -match '"r2mcp":\s*\{[^}]*"args":\s*\[\s*\]') 'Claude: empty args survives a later rewrite as []'
+    $roundTrip = Read-ReverseJsonAsHashtable -Path $env:CLAUDE_MCP_CONFIG
+    Assert-True ($roundTrip['mcpServers']['r2mcp']['args'] -is [array] -and @($roundTrip['mcpServers']['r2mcp']['args']).Count -eq 0) 'ToolDiscovery: Read-ReverseJsonAsHashtable keeps empty arrays'
+    Assert-True ($roundTrip['mcpServers']['math-mcp']['args'] -is [array]) 'ToolDiscovery: Read-ReverseJsonAsHashtable keeps one-element arrays'
+    $antigravityText = Get-Content -LiteralPath $env:ANTIGRAVITY_MCP_CONFIG -Raw -Encoding UTF8
+    Assert-True ($antigravityText -match '"r2mcp":\s*\{[^}]*"args":\s*\[\s*\]') 'Antigravity: empty args survives rewrite as []'
 
     # --- 2. Antigravity writer: command/args/env or serverUrl, no type, no cwd ---------
     $antigravity = Get-Content -LiteralPath $env:ANTIGRAVITY_MCP_CONFIG -Raw -Encoding UTF8 | ConvertFrom-Json

@@ -636,7 +636,9 @@ function ConvertTo-ReverseHashtable {
         foreach ($item in $InputObject) {
             $items += ,(ConvertTo-ReverseHashtable -InputObject $item)
         }
-        return $items
+        # Unary comma: a plain `return $items` unrolls one-element arrays into scalars and
+        # empty arrays into $null, which would rewrite "args": ["x"] / [] in client configs.
+        return ,$items
     }
 
     return $InputObject
