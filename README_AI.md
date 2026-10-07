@@ -373,21 +373,43 @@ Whether you use Claude Code, Codex CLI, Cursor, Cline, Windsurf, or another code
 
 ### MCP Example
 
+Claude Code project scope is `<package root>\.mcp.json` (gitignored because it carries
+machine paths). Every entry needs an explicit `type`: `http` for URL servers, `stdio`
+for command servers.
+
 ```json
 {
   "mcpServers": {
     "anything-analyzer": {
+      "type": "http",
       "url": "http://localhost:23816/mcp",
       "headers": { "Authorization": "Bearer <token from local mcp-server-config.json>" }
     },
-    "idapro": { "url": "http://127.0.0.1:13337/mcp" },
-    "jshook": { "command": "npx", "args": ["-y", "@jshookmcp/jshook@0.3.4"], "env": { "JSHOOK_BASE_PROFILE": "search" } },
-    "burpsuite": { "command": "node", "args": ["<package root>/burp-mcp-full/mcp-bridge.js"] }
+    "idapro": { "type": "http", "url": "http://127.0.0.1:13337/mcp" },
+    "jshook": { "type": "stdio", "command": "npx", "args": ["-y", "@jshookmcp/jshook@0.3.4"], "env": { "JSHOOK_BASE_PROFILE": "search" } },
+    "burpsuite": { "type": "stdio", "command": "node", "args": ["<package root>/burp-mcp-full/mcp-bridge.js"] }
   }
 }
 ```
 
 The bootstrap command enables bearer authentication for Anything Analyzer. It registers the generated token only when an MCP host is explicitly selected (`-McpHostTarget` or `--mcp-host`). Manual configurations must include the `Authorization` header shown above.
+
+### What the bootstrap writes per client
+
+`bootstrap-reverse.ps1 -McpHostTarget <Claude|Codex|Antigravity|Both|All>` writes
+project-scope files only (default `-McpScope Project`); none of them is committed:
+
+| Client | File | Shape |
+|---|---|---|
+| Claude Code | `.mcp.json` + `.claude\settings.local.json` (`enabledMcpjsonServers`) | `mcpServers` with `"type": "stdio"` or `"type": "http"` on every entry |
+| Codex CLI | `.codex\config.toml` | `[mcp_servers.<name>]` (quoted when the name needs it) with `command`/`args`/`env` or `url` |
+| Antigravity | `.agents\mcp_config.json` | `mcpServers` with `command`/`args`/`env` or `serverUrl`; no `type`, no `cwd` |
+| dsh web | `.dsh\agent-presets\reverse-skill\agent.cordis.yml` | **Not generated.** Derive it from the installed Standard preset as described in [docs/mcp/dsh-web.md](docs/mcp/dsh-web.md) |
+
+`-McpScope User` writes the Codex user config and registers Claude servers through
+`claude mcp add-json <name> '<json>' --scope user` (Claude Code does not read
+`%USERPROFILE%\.claude\mcp.json`). `CLAUDE_MCP_CONFIG`, `CODEX_CONFIG_PATH` and
+`ANTIGRAVITY_MCP_CONFIG` override the file paths.
 
 ### Minimum Prompt Requirements
 
@@ -399,7 +421,7 @@ No matter how you inject instructions, at minimum tell the AI about these three 
 
 ### Claude Code
 
-Claude Code is the best fit for directly connecting this package. If you already have `.claude\settings.local.json`, `.claude\mcp.json`, `RULES.md`, or `route-reverse.ps1`, only update old paths to the current installation path.
+Claude Code is the best fit for directly connecting this package. If you already have `.claude\settings.local.json`, `.mcp.json`, `RULES.md`, or `route-reverse.ps1`, only update old paths to the current installation path.
 
 ### Codex CLI / Cursor / Cline / Windsurf / Others
 

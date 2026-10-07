@@ -53,7 +53,9 @@ function Assert-GitCheckoutState {
     }
     try {
         $ErrorActionPreference = 'Continue'
-        $status = @(& $GitPath -C $CheckoutPath status --porcelain --untracked-files=all 2>$null)
+        # core.autocrlf=false: a system-level autocrlf=true makes pinned checkouts with
+        # CRLF/mixed line endings (SecLists) look modified although nothing was touched.
+        $status = @(& $GitPath -c core.autocrlf=false -C $CheckoutPath status --porcelain --untracked-files=all 2>$null)
         $statusExitCode = $LASTEXITCODE
     }
     finally {
@@ -104,13 +106,17 @@ function Ensure-GitCloneInstall {
     $stagePath = Join-Path $parent ('.reverse-bootstrap-{0}' -f [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $stagePath | Out-Null
     try {
-        & $git init --quiet $stagePath
+        & $git -c core.autocrlf=false init --quiet $stagePath
         if ($LASTEXITCODE -ne 0) { throw 'git init failed' }
+        # Persist the setting in the checkout so later status checks (and the user's own
+        # git commands) keep the pinned tree byte-identical regardless of system autocrlf.
+        & $git -C $stagePath config core.autocrlf false
+        if ($LASTEXITCODE -ne 0) { throw 'git config core.autocrlf failed' }
         & $git -C $stagePath remote add origin $Definition.repo
         if ($LASTEXITCODE -ne 0) { throw 'git remote add failed' }
-        & $git -C $stagePath fetch --depth 1 origin $pinnedCommit
+        & $git -c core.autocrlf=false -C $stagePath fetch --depth 1 origin $pinnedCommit
         if ($LASTEXITCODE -ne 0) { throw 'git fetch failed' }
-        & $git -C $stagePath checkout --quiet --detach FETCH_HEAD
+        & $git -c core.autocrlf=false -C $stagePath checkout --quiet --detach FETCH_HEAD
         if ($LASTEXITCODE -ne 0) { throw 'git checkout failed' }
         Assert-GitCheckoutState -GitPath $git -CheckoutPath $stagePath -PinnedCommit $pinnedCommit
         Move-BootstrapDirectory -Source $stagePath -Destination $TargetPath

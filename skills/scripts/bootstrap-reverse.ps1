@@ -9,8 +9,15 @@ param(
 
     [switch]$StartServices,
 
-    [ValidateSet('None', 'Claude', 'Codex', 'Both')]
-    [string]$McpHostTarget = 'None'
+    # Both = Claude + Codex (kept for existing docs); All = Claude + Codex + Antigravity.
+    [ValidateSet('None', 'Claude', 'Codex', 'Antigravity', 'Both', 'All')]
+    [string]$McpHostTarget = 'None',
+
+    # Project writes <repo>\.mcp.json, <repo>\.codex\config.toml and <repo>\.agents\mcp_config.json
+    # (all gitignored). User writes the Codex user config and registers Claude servers through
+    # `claude mcp add-json --scope user`; Antigravity has no user-scope writer here.
+    [ValidateSet('Project', 'User')]
+    [string]$McpScope = 'Project'
 )
 
 # 临时目录统一入口（$env:TEMP 在 Linux/macOS 上可能未设置）
@@ -96,13 +103,24 @@ function Get-McpHostTargets {
     switch ($McpHostTarget) {
         'Claude' { return @('Claude') }
         'Codex' { return @('Codex') }
+        'Antigravity' { return @('Antigravity') }
         'Both' { return @('Claude', 'Codex') }
+        'All' { return @('Claude', 'Codex', 'Antigravity') }
         default { return @() }
     }
 }
 
 function Test-ReverseIsWindows {
     return $env:OS -eq 'Windows_NT'
+}
+
+function Get-McpScopeSetting {
+    # $McpScope is the script parameter; tests that dot-source single functions may not define it.
+    $variable = Get-Variable -Name McpScope -ErrorAction SilentlyContinue
+    if ($variable -and -not [string]::IsNullOrWhiteSpace([string]$variable.Value)) {
+        return [string]$variable.Value
+    }
+    return 'Project'
 }
 
 function Test-ReverseIsElevated {
@@ -230,10 +248,41 @@ function Ensure-AnythingAnalyzerMcpConfig {
     return $token
 }
 
+function Get-VsWherePath {
+    if (-not [string]::IsNullOrWhiteSpace($env:REVERSE_VSWHERE)) {
+        return $env:REVERSE_VSWHERE
+    }
+    $candidates = @(
+        (Join-ReverseOptionalPath -Path ${env:ProgramFiles(x86)} -ChildPath 'Microsoft Visual Studio\Installer\vswhere.exe'),
+        (Join-ReverseOptionalPath -Path $env:ProgramFiles -ChildPath 'Microsoft Visual Studio\Installer\vswhere.exe')
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+    return ($candidates | Select-Object -First 1)
+}
+
 function Test-VsBuildToolsInstalled {
+    # Any Visual Studio product (Community/Professional/Enterprise/BuildTools, any
+    # version) that carries the x64/x86 C++ toolset satisfies native rebuilds.
+    $vswhere = Get-VsWherePath
+    if (-not [string]::IsNullOrWhiteSpace($vswhere)) {
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $installations = @(& $vswhere -products '*' -requires 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64' -property installationPath 2>$null)
+            $vswhereExit = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+        $installations = @($installations | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+        if ($vswhereExit -eq 0 -and $installations.Count -gt 0) {
+            return $true
+        }
+    }
+
+    # Fallback for hosts without vswhere: the Build Tools folder layout.
     $roots = @(
-        (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\2022\BuildTools'),
-        (Join-Path $env:ProgramFiles 'Microsoft Visual Studio\2022\BuildTools')
+        (Join-ReverseOptionalPath -Path ${env:ProgramFiles(x86)} -ChildPath 'Microsoft Visual Studio\2022\BuildTools'),
+        (Join-ReverseOptionalPath -Path $env:ProgramFiles -ChildPath 'Microsoft Visual Studio\2022\BuildTools')
     ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
 
     foreach ($root in $roots) {
@@ -426,7 +475,9 @@ function Expand-ArchiveIntoDirectory {
     }
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 
-    $children = Get-ChildItem -LiteralPath $tempExtract
+    # @() is required: under Set-StrictMode a single top-level entry (bkcrack-*.zip)
+    # is a bare FileSystemInfo whose .Count throws "The property 'Count' cannot be found".
+    $children = @(Get-ChildItem -LiteralPath $tempExtract -Force)
     if ($children.Count -eq 1 -and $children[0].PSIsContainer) {
         $sourceDir = $children[0].FullName
     }
@@ -523,37 +574,82 @@ function Ensure-ApktoolInstall {
 function Ensure-PipPackageInstall {
     param([Parameter(Mandatory = $true)]$Definition)
 
-    Ensure-PythonRuntime
-    $python = Get-FirstCommandPath -Names @('python', 'python3')
     # Use pipSource (git URL) if available, otherwise use pipPackage name
     $installTarget = if ($Definition.PSObject.Properties['pipSource'] -and -not [string]::IsNullOrWhiteSpace($Definition.pipSource)) {
         $Definition.pipSource
     } else {
         $Definition.pipPackage
     }
+
+    # uvPython pins an interpreter for packages whose dependency wheels lag behind the
+    # system Python (pwntools -> unicorn has no CPython 3.14 wheel). `uv tool install`
+    # creates an isolated environment and exposes the console scripts in ~\.local\bin.
+    $uvPython = if ($Definition.PSObject.Properties['uvPython']) { [string]$Definition.uvPython } else { '' }
+    if (-not [string]::IsNullOrWhiteSpace($uvPython)) {
+        $uv = Get-FirstCommandPath -Names @('uv')
+        if (-not [string]::IsNullOrWhiteSpace($uv)) {
+            & $uv tool install --python $uvPython --force $installTarget
+            if ($LASTEXITCODE -ne 0) {
+                throw "uv tool install --python $uvPython failed for $installTarget"
+            }
+            Add-ReverseProcessPath -Path (Join-Path (Get-ReverseUserProfilePath) '.local\bin')
+            return
+        }
+        Write-Warning "uv is not installed; falling back to pip for $installTarget. It needs Python $uvPython wheels (install uv or a Python $uvPython interpreter if the build fails)."
+    }
+
+    Ensure-PythonRuntime
+    $python = Get-FirstCommandPath -Names @('python', 'python3')
     & $python -m pip install --upgrade $installTarget
     if ($LASTEXITCODE -ne 0) {
         throw "pip install failed for $installTarget"
     }
 }
 
-function Get-ClaudeMcpConfig {
-    $path = Get-ClaudeMcpConfigPath
-    if (-not (Test-Path -LiteralPath $path)) {
-        return @{ path = $path; json = @{ mcpServers = @{} } }
+function Ensure-CargoCrateInstall {
+    param([Parameter(Mandatory = $true)]$Definition)
+
+    if (-not $Definition.PSObject.Properties['cargoCrate'] -or [string]::IsNullOrWhiteSpace([string]$Definition.cargoCrate)) {
+        throw "cargo-install capability $($Definition.name) is missing cargoCrate in bootstrap-manifest.json."
+    }
+    $cargo = Get-FirstCommandPath -Names @('cargo')
+    if ([string]::IsNullOrWhiteSpace($cargo)) {
+        $cargoCandidate = Join-Path (Get-ReverseUserProfilePath) '.cargo\bin\cargo.exe'
+        if (Test-Path -LiteralPath $cargoCandidate) { $cargo = $cargoCandidate }
+    }
+    if ([string]::IsNullOrWhiteSpace($cargo)) {
+        throw "cargo is required to install $($Definition.cargoCrate); install Rust (rustup) first. Docs: $($Definition.docsUrl)"
     }
 
-    $json = Read-ReverseJsonAsHashtable -Path $path
-    if ($null -eq $json) {
-        $json = @{ mcpServers = @{} }
+    $arguments = @('install', '--locked', [string]$Definition.cargoCrate)
+    if ($Definition.PSObject.Properties['pinnedVersion'] -and -not [string]::IsNullOrWhiteSpace([string]$Definition.pinnedVersion)) {
+        $arguments += @('--version', [string]$Definition.pinnedVersion)
     }
-    if (-not $json.Contains('mcpServers')) {
-        $json['mcpServers'] = @{}
+    & $cargo @arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "cargo install failed for $($Definition.cargoCrate)"
     }
-    return @{ path = $path; json = $json }
+    Add-ReverseProcessPath -Path (Join-Path (Get-ReverseUserProfilePath) '.cargo\bin')
 }
 
-function Save-ClaudeMcpConfig {
+function Read-ReverseMcpJsonConfig {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return @{ path = $Path; json = [ordered]@{ mcpServers = [ordered]@{} } }
+    }
+
+    $json = Read-ReverseJsonAsHashtable -Path $Path
+    if ($null -eq $json -or -not ($json -is [System.Collections.IDictionary])) {
+        $json = [ordered]@{ mcpServers = [ordered]@{} }
+    }
+    if (-not $json.Contains('mcpServers') -or $null -eq $json['mcpServers'] -or -not ($json['mcpServers'] -is [System.Collections.IDictionary])) {
+        $json['mcpServers'] = [ordered]@{}
+    }
+    return @{ path = $Path; json = $json }
+}
+
+function Save-ReverseMcpJsonConfig {
     param([Parameter(Mandatory = $true)]$Config)
 
     $parent = Split-Path -Path $Config.path -Parent
@@ -561,7 +657,129 @@ function Save-ClaudeMcpConfig {
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
     }
 
-    $Config.json | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $Config.path -Encoding utf8
+    $content = $Config.json | ConvertTo-Json -Depth 10
+    [System.IO.File]::WriteAllText($Config.path, $content + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+}
+
+function Get-ClaudeMcpConfig {
+    return Read-ReverseMcpJsonConfig -Path (Get-ClaudeMcpConfigPath)
+}
+
+function Save-ClaudeMcpConfig {
+    param([Parameter(Mandatory = $true)]$Config)
+    Save-ReverseMcpJsonConfig -Config $Config
+}
+
+function ConvertTo-ClaudeMcpServerDefinition {
+    param([Parameter(Mandatory = $true)][hashtable]$ServerDefinition)
+
+    # Claude Code requires an explicit transport: "http" for url entries, "stdio" otherwise.
+    $claudeDefinition = [ordered]@{}
+    $claudeDefinition['type'] = if ($ServerDefinition.Contains('url')) { 'http' } else { 'stdio' }
+    foreach ($key in @('url', 'command', 'args', 'env', 'headers')) {
+        if ($ServerDefinition.Contains($key)) {
+            $claudeDefinition[$key] = $ServerDefinition[$key]
+        }
+    }
+    foreach ($key in $ServerDefinition.Keys) {
+        if ($key -in @('type', 'url', 'command', 'args', 'env', 'headers', 'bearer_token_env_var', 'cwd')) { continue }
+        $claudeDefinition[$key] = $ServerDefinition[$key]
+    }
+    if ($claudeDefinition.Contains('env') -and ($null -eq $claudeDefinition['env'] -or $claudeDefinition['env'].Count -eq 0)) {
+        $claudeDefinition.Remove('env')
+    }
+    return $claudeDefinition
+}
+
+function Enable-ClaudeMcpJsonServer {
+    param([Parameter(Mandatory = $true)][string]$ServerName)
+
+    # Claude Code only loads <repo>\.mcp.json entries the user approved; the project's
+    # .claude\settings.local.json (gitignored) records that approval. Merge, never overwrite.
+    $path = Get-ClaudeSettingsLocalPath
+    $settings = $null
+    if (Test-Path -LiteralPath $path) {
+        $settings = Read-ReverseJsonAsHashtable -Path $path
+    }
+    if ($null -eq $settings -or -not ($settings -is [System.Collections.IDictionary])) {
+        $settings = [ordered]@{}
+    }
+    $enabled = @()
+    if ($settings.Contains('enabledMcpjsonServers') -and $null -ne $settings['enabledMcpjsonServers']) {
+        $enabled = @($settings['enabledMcpjsonServers'] | ForEach-Object { [string]$_ })
+    }
+    if ($enabled -contains $ServerName) {
+        return
+    }
+    $settings['enabledMcpjsonServers'] = @($enabled + @($ServerName))
+
+    $parent = Split-Path -Path $path -Parent
+    if (-not (Test-Path -LiteralPath $parent)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+    $content = $settings | ConvertTo-Json -Depth 10
+    [System.IO.File]::WriteAllText($path, $content + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+}
+
+function Register-ClaudeUserMcpServer {
+    param(
+        [Parameter(Mandatory = $true)][string]$ServerName,
+        [Parameter(Mandatory = $true)]$ClaudeDefinition
+    )
+
+    # User scope lives inside ~/.claude.json, which the Claude Code CLI owns; go through it.
+    $claude = Get-FirstCommandPath -Names @('claude.exe', 'claude', 'claude.cmd') -PreferApplication
+    if ([string]::IsNullOrWhiteSpace($claude)) {
+        throw "Claude user-scope registration needs the 'claude' CLI on PATH (claude mcp add-json $ServerName ... --scope user)."
+    }
+    $payload = $ClaudeDefinition | ConvertTo-Json -Depth 10 -Compress
+    & $claude mcp remove $ServerName --scope user *> $null
+    & $claude mcp add-json $ServerName $payload --scope user
+    if ($LASTEXITCODE -ne 0) {
+        throw "claude mcp add-json failed for $ServerName (exit $LASTEXITCODE)."
+    }
+}
+
+function ConvertTo-AntigravityMcpServerDefinition {
+    param([Parameter(Mandatory = $true)][hashtable]$ServerDefinition)
+
+    # Antigravity: mcpServers with command/args/env for stdio and serverUrl for remote
+    # servers; no "type" and no "cwd" field. It launches npx directly, not via cmd /c.
+    $antigravityDefinition = [ordered]@{}
+    if ($ServerDefinition.Contains('url')) {
+        $antigravityDefinition['serverUrl'] = [string]$ServerDefinition['url']
+        if ($ServerDefinition.Contains('headers') -and $null -ne $ServerDefinition['headers'] -and $ServerDefinition['headers'].Count -gt 0) {
+            $antigravityDefinition['headers'] = $ServerDefinition['headers']
+        }
+        return $antigravityDefinition
+    }
+
+    $command = [string]$ServerDefinition['command']
+    $arguments = @()
+    if ($ServerDefinition.Contains('args') -and $null -ne $ServerDefinition['args']) {
+        $arguments = @($ServerDefinition['args'] | ForEach-Object { [string]$_ })
+    }
+    if ($command -in @('cmd', 'cmd.exe') -and $arguments.Count -ge 2 -and $arguments[0] -eq '/c') {
+        $command = $arguments[1]
+        $arguments = if ($arguments.Count -gt 2) { @($arguments[2..($arguments.Count - 1)]) } else { @() }
+    }
+    $antigravityDefinition['command'] = $command
+    $antigravityDefinition['args'] = @($arguments)
+    if ($ServerDefinition.Contains('env') -and $null -ne $ServerDefinition['env'] -and $ServerDefinition['env'].Count -gt 0) {
+        $antigravityDefinition['env'] = $ServerDefinition['env']
+    }
+    return $antigravityDefinition
+}
+
+function Set-AntigravityMcpServer {
+    param(
+        [Parameter(Mandatory = $true)][string]$ServerName,
+        [Parameter(Mandatory = $true)][hashtable]$ServerDefinition
+    )
+
+    $config = Read-ReverseMcpJsonConfig -Path (Get-AntigravityMcpConfigPath)
+    $config.json['mcpServers'][$ServerName] = ConvertTo-AntigravityMcpServerDefinition -ServerDefinition $ServerDefinition
+    Save-ReverseMcpJsonConfig -Config $config
 }
 
 function ConvertTo-TomlLiteral {
@@ -591,7 +809,10 @@ function Remove-CodexMcpServerBlocks {
         [Parameter(Mandatory = $true)][string]$ServerName
     )
 
-    $targetPattern = '^\[mcp_servers\.{0}(?:\.env)?\]\s*$' -f [regex]::Escape($ServerName)
+    # Match the server table and every sub-table of it ([...env], [...tools.x]) whether the
+    # name is bare, "double-quoted" or 'single-quoted'.
+    $escapedName = [regex]::Escape($ServerName)
+    $targetPattern = '^\s*\[\s*mcp_servers\s*\.\s*(?:{0}|"{0}"|''{0}'')\s*(?:\.[^\]]*)?\]\s*(?:#.*)?$' -f $escapedName
     $result = New-Object System.Collections.Generic.List[string]
     $skipBlock = $false
 
@@ -600,7 +821,7 @@ function Remove-CodexMcpServerBlocks {
     }
 
     foreach ($line in $Lines) {
-        if ($line -match '^\[') {
+        if ($line -match '^\s*\[') {
             if ($line -match $targetPattern) {
                 $skipBlock = $true
                 continue
@@ -625,11 +846,17 @@ function Set-CodexMcpServer {
         [Parameter(Mandatory = $true)][hashtable]$ServerDefinition
     )
 
-    $path = Get-CodexConfigPath
+    # Inline scope lookup: test-bootstrap-codex-encoding.ps1 dot-sources this function alone.
+    $scopeVariable = Get-Variable -Name McpScope -ErrorAction SilentlyContinue
+    $scope = if ($scopeVariable -and -not [string]::IsNullOrWhiteSpace([string]$scopeVariable.Value)) { [string]$scopeVariable.Value } else { 'Project' }
+    $path = Get-CodexConfigPath -Scope $scope
     $parent = Split-Path -Path $path -Parent
     if (-not (Test-Path -LiteralPath $parent)) {
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
     }
+
+    # TOML bare keys allow A-Za-z0-9_- only; anything else must be a quoted key.
+    $tableName = if ($ServerName -match '^[A-Za-z0-9_-]+$') { $ServerName } else { '"' + $ServerName.Replace('\', '\\').Replace('"', '\"') + '"' }
 
     $lines = @()
     $writeUtf8Bom = $false
@@ -673,8 +900,8 @@ function Set-CodexMcpServer {
         $lines += ''
     }
 
-    $lines += "[mcp_servers.$ServerName]"
-    foreach ($key in @('type', 'url', 'command', 'args', 'bearer_token_env_var')) {
+    $lines += "[mcp_servers.$tableName]"
+    foreach ($key in @('url', 'command', 'args', 'bearer_token_env_var')) {
         if ($ServerDefinition.Contains($key)) {
             $lines += "$key = $(ConvertTo-TomlLiteral -Value $ServerDefinition[$key])"
         }
@@ -685,7 +912,7 @@ function Set-CodexMcpServer {
 
     if ($ServerDefinition.Contains('env') -and $ServerDefinition['env'] -is [System.Collections.IDictionary] -and $ServerDefinition['env'].Count -gt 0) {
         $lines += ''
-        $lines += "[mcp_servers.$ServerName.env]"
+        $lines += "[mcp_servers.$tableName.env]"
         foreach ($envKey in ($ServerDefinition['env'].Keys | Sort-Object)) {
             $lines += "$envKey = $(ConvertTo-TomlLiteral -Value $ServerDefinition['env'][$envKey])"
         }
@@ -708,27 +935,74 @@ function Ensure-McpServer {
     foreach ($target in Get-McpHostTargets) {
         switch ($target) {
             'Claude' {
-                $config = Get-ClaudeMcpConfig
-                $claudeDefinition = @{}
-                foreach ($key in $ServerDefinition.Keys) {
-                    if ($key -ne 'bearer_token_env_var') {
-                        $claudeDefinition[$key] = $ServerDefinition[$key]
-                    }
+                $claudeDefinition = ConvertTo-ClaudeMcpServerDefinition -ServerDefinition $ServerDefinition
+                if ((Get-McpScopeSetting) -eq 'User') {
+                    Register-ClaudeUserMcpServer -ServerName $ServerName -ClaudeDefinition $claudeDefinition
                 }
-                $config.json.mcpServers[$ServerName] = $claudeDefinition
-                Save-ClaudeMcpConfig -Config $config
+                else {
+                    $config = Get-ClaudeMcpConfig
+                    $config.json['mcpServers'][$ServerName] = $claudeDefinition
+                    Save-ClaudeMcpConfig -Config $config
+                    Enable-ClaudeMcpJsonServer -ServerName $ServerName
+                }
             }
             'Codex' {
+                # Codex derives the transport from url/command; it has no "type" key and
+                # takes bearer_token_env_var instead of literal headers.
                 $codexDefinition = @{}
                 foreach ($key in $ServerDefinition.Keys) {
-                    if ($key -ne 'headers') {
+                    if ($key -notin @('headers', 'type')) {
                         $codexDefinition[$key] = $ServerDefinition[$key]
                     }
                 }
                 Set-CodexMcpServer -ServerName $ServerName -ServerDefinition $codexDefinition
             }
+            'Antigravity' {
+                if ((Get-McpScopeSetting) -eq 'User') {
+                    Write-Warning "Antigravity has no user-scope writer here; $ServerName was not registered for it. Use -McpScope Project."
+                }
+                else {
+                    Set-AntigravityMcpServer -ServerName $ServerName -ServerDefinition $ServerDefinition
+                }
+            }
         }
     }
+}
+
+function Get-ManifestMcpServerDefinition {
+    param([Parameter(Mandatory = $true)]$Definition)
+
+    # Builds the client-neutral server definition from manifest fields:
+    # mcpCommand/mcpArgs/mcpEnv -> stdio, otherwise mcpUrl -> remote/local HTTP.
+    if ($Definition.PSObject.Properties['mcpCommand'] -and -not [string]::IsNullOrWhiteSpace([string]$Definition.mcpCommand)) {
+        $envMap = @{}
+        if ($Definition.PSObject.Properties['mcpEnv'] -and $null -ne $Definition.mcpEnv) {
+            foreach ($property in $Definition.mcpEnv.PSObject.Properties) {
+                $envMap[$property.Name] = $property.Value
+            }
+        }
+        $arguments = if ($Definition.PSObject.Properties['mcpArgs'] -and $null -ne $Definition.mcpArgs) { @($Definition.mcpArgs) } else { @() }
+        return Get-McpCommandServerDefinition -Command ([string]$Definition.mcpCommand) -Arguments $arguments -Env $envMap
+    }
+    if ($Definition.PSObject.Properties['mcpUrl'] -and -not [string]::IsNullOrWhiteSpace([string]$Definition.mcpUrl)) {
+        return @{ type = 'http'; url = [string]$Definition.mcpUrl }
+    }
+    return $null
+}
+
+function Write-PostInstallSteps {
+    param([Parameter(Mandatory = $true)]$Definition)
+
+    # postInstallSteps are human steps the installer cannot perform (GUI plugin
+    # installs, license activation). Surface them instead of silently dropping them.
+    if (-not $Definition.PSObject.Properties['postInstallSteps'] -or $null -eq $Definition.postInstallSteps) {
+        return @()
+    }
+    $steps = @($Definition.postInstallSteps | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    foreach ($step in $steps) {
+        Write-Warning "[post-install] $($Definition.name): $step"
+    }
+    return $steps
 }
 
 function Get-McpCommandServerDefinition {
@@ -863,10 +1137,14 @@ function Ensure-Capability {
     if ($definition.PSObject.Properties['canAutoInstall'] -and $definition.canAutoInstall -eq $false) {
         $hint = if ($definition.PSObject.Properties['manualInstallHint']) { $definition.manualInstallHint } else { "Please install $Name manually. Docs: $($definition.docsUrl)" }
         Write-Warning "MANUAL_INSTALL_REQUIRED: $Name — $hint"
-        # Still try to register MCP URL if applicable and a host was explicitly selected.
-        if ($definition.PSObject.Properties['mcpNames'] -and $definition.PSObject.Properties['mcpUrl']) {
-            Ensure-McpServer -ServerName $definition.mcpNames[0] -ServerDefinition @{ url = $definition.mcpUrl }
+        # Still register the MCP entry (stdio bridge or URL) if applicable and a host was explicitly selected.
+        if ($definition.PSObject.Properties['mcpNames'] -and @($definition.mcpNames).Count -gt 0) {
+            $manualServerDefinition = Get-ManifestMcpServerDefinition -Definition $definition
+            if ($null -ne $manualServerDefinition) {
+                Ensure-McpServer -ServerName $definition.mcpNames[0] -ServerDefinition $manualServerDefinition
+            }
         }
+        Write-PostInstallSteps -Definition $definition | Out-Null
         return $false
     }
 
@@ -902,6 +1180,14 @@ function Ensure-Capability {
         'pip-package' {
             Ensure-PipPackageInstall -Definition $definition
             return $true
+        }
+        'cargo-install' {
+            Ensure-CargoCrateInstall -Definition $definition
+            $toolSpec = Resolve-ReverseToolSpec -Name $Name
+            if (-not $toolSpec.Available) {
+                throw "$Name was installed with cargo, but bootstrap could not resolve the executable in this process."
+            }
+            return $toolSpec
         }
         'winget-package' {
             $wingetId = $definition.wingetId
@@ -1131,6 +1417,7 @@ foreach ($name in $expandedCapabilities) {
         }
 
         if (-not $manualRequired) {
+            $postInstallSteps = @(Write-PostInstallSteps -Definition $definition)
             $state = Get-ReverseCapabilityState -Name $name
             $status = if ($state -and -not $state.Ready) { 'configured-not-ready' } else { 'ready' }
             $results += [pscustomobject]@{
@@ -1139,6 +1426,7 @@ foreach ($name in $expandedCapabilities) {
                 ready = if ($state) { $state.Ready } else { $null }
                 registered = if ($state) { $state.Registered } else { $null }
                 service_online = if ($state) { $state.ServiceOnline } else { $null }
+                post_install_steps = $postInstallSteps
             }
         }
     }

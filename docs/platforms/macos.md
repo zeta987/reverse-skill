@@ -100,7 +100,7 @@ If the service uses a custom port or token, update your Agent client's MCP confi
 
 ## MCP setup notes
 
-The core bootstrap is client-neutral by default. It **does not write** `~/.claude/mcp.json` or `~/.codex/config.toml` unless an MCP host is explicitly selected. For MCP capabilities, use one of:
+The core bootstrap is client-neutral by default. It **does not write** the project-scope `<repo>/.mcp.json` (Claude Code) or `~/.codex/config.toml` unless an MCP host is explicitly selected. Claude Code never reads `~/.claude/mcp.json`; the project file is gitignored. For MCP capabilities, use one of:
 
 ```bash
 --mcp-host=claude

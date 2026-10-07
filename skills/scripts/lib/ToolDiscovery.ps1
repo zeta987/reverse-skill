@@ -92,7 +92,8 @@ function Get-ReverseToolCatalog {
             FixedVersion = 'v0.5.0'
             VersionArgs = @()
             Fallbacks = @(
-                [pscustomobject]@{ Type = 'command'; Value = 'apksigner' }
+                @([pscustomobject]@{ Type = 'command'; Value = 'apksigner' }) +
+                @(Get-ReverseAndroidBuildToolsPaths -FileName 'apksigner.bat' | ForEach-Object { [pscustomobject]@{ Type = 'path'; Value = $_ } })
             )
         }
         [pscustomobject]@{
@@ -102,7 +103,8 @@ function Get-ReverseToolCatalog {
             FixedVersion = 'v0.5.0'
             VersionArgs = @()
             Fallbacks = @(
-                [pscustomobject]@{ Type = 'command'; Value = 'zipalign' }
+                @([pscustomobject]@{ Type = 'command'; Value = 'zipalign' }) +
+                @(Get-ReverseAndroidBuildToolsPaths -FileName 'zipalign.exe' | ForEach-Object { [pscustomobject]@{ Type = 'path'; Value = $_ } })
             )
         }
         [pscustomobject]@{
@@ -146,6 +148,10 @@ function Get-ReverseToolCatalog {
             VersionArgs = @()
             Fallbacks = @(
                 [pscustomobject]@{ Type = 'command'; Value = 'ida' },
+                [pscustomobject]@{ Type = 'path'; Value = (Join-ReverseOptionalPath -Path ([Environment]::GetEnvironmentVariable('IDADIR')) -ChildPath 'ida.exe') },
+                [pscustomobject]@{ Type = 'path'; Value = (Join-ReverseOptionalPath -Path ([Environment]::GetEnvironmentVariable('IDADIR')) -ChildPath 'ida64.exe') },
+                [pscustomobject]@{ Type = 'path'; Value = 'C:\Program Files\IDA Professional 9.0\ida.exe' },
+                [pscustomobject]@{ Type = 'path'; Value = 'C:\Program Files\IDA Professional 9.0\ida64.exe' },
                 [pscustomobject]@{ Type = 'path'; Value = 'C:\Program Files\IDA Professional 9.4\ida.exe' },
                 [pscustomobject]@{ Type = 'path'; Value = 'C:\Program Files\IDA Pro 9.4\ida.exe' },
                 [pscustomobject]@{ Type = 'path'; Value = 'C:\Program Files\IDA Pro\ida.exe' },
@@ -486,7 +492,8 @@ function Get-ReverseToolCatalog {
             Purpose = '固件提取与分析'
             VersionArgs = @('--version')
             Fallbacks = @(
-                [pscustomobject]@{ Type = 'command'; Value = 'binwalk' }
+                [pscustomobject]@{ Type = 'command'; Value = 'binwalk' },
+                [pscustomobject]@{ Type = 'path'; Value = (Join-Path $userProfile '.cargo\bin\binwalk.exe') }
             )
         }
         [pscustomobject]@{
@@ -506,8 +513,8 @@ function Get-ReverseToolCatalog {
             FixedVersion = 'v0.5.0'
             VersionArgs = @()
             Fallbacks = @(
-                [pscustomobject]@{ Type = 'command'; Value = 'pwntools' },
-                [pscustomobject]@{ Type = 'command'; Value = 'pwn' }
+                [pscustomobject]@{ Type = 'command'; Value = 'pwn' },
+                [pscustomobject]@{ Type = 'path'; Value = (Join-Path $userProfile '.local\bin\pwn.exe') }
             )
         }
         [pscustomobject]@{
@@ -532,6 +539,43 @@ function Get-ReverseSkillRoot {
     return [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 }
 
+function Get-ReverseRepoRoot {
+    [CmdletBinding()]
+    param()
+
+    # skills\scripts\lib -> skills -> <repo>
+    return [System.IO.Path]::GetFullPath((Join-Path (Get-ReverseSkillRoot) '..'))
+}
+
+function Get-ReverseAndroidBuildToolsPaths {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FileName
+    )
+
+    $localAppData = [Environment]::GetEnvironmentVariable('LOCALAPPDATA')
+    $sdkRoots = @(
+        [Environment]::GetEnvironmentVariable('ANDROID_HOME'),
+        [Environment]::GetEnvironmentVariable('ANDROID_SDK_ROOT'),
+        (Join-ReverseOptionalPath -Path $localAppData -ChildPath 'Android\Sdk')
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+
+    $paths = @()
+    foreach ($sdkRoot in $sdkRoots) {
+        $buildTools = Join-Path $sdkRoot 'build-tools'
+        if (-not (Test-Path -LiteralPath $buildTools -PathType Container)) {
+            continue
+        }
+        $versions = @(Get-ChildItem -LiteralPath $buildTools -Directory -ErrorAction SilentlyContinue |
+            Sort-Object -Property @{ Expression = { $v = $null; if ([version]::TryParse(($_.Name -replace '[^0-9.].*$', ''), [ref]$v)) { $v } else { [version]'0.0' } }; Descending = $true })
+        foreach ($version in $versions) {
+            $paths += (Join-Path $version.FullName $FileName)
+        }
+    }
+    return @($paths)
+}
+
 function Resolve-ReversePathTemplate {
     [CmdletBinding()]
     param(
@@ -550,6 +594,7 @@ function Resolve-ReversePathTemplate {
         '%APPDATA%' = [string]([Environment]::GetEnvironmentVariable('APPDATA'))
         '%TEMP%' = [string]([Environment]::GetEnvironmentVariable('TEMP'))
         '%SKILL_ROOT%' = Get-ReverseSkillRoot
+        '%REPO_ROOT%' = Get-ReverseRepoRoot
     }
 
     foreach ($key in $replacements.Keys) {
@@ -687,6 +732,16 @@ function Get-ReverseBootstrapDefinition {
     return Get-ReverseBootstrapCatalog | Where-Object { $_.name -eq $Name } | Select-Object -First 1
 }
 
+# MCP client configuration paths.
+#
+# Project scope (default) keeps this repository's servers inside the repository,
+# in files that are gitignored because they embed machine-specific paths:
+#   Claude Code   <repo>\.mcp.json           (+ .claude\settings.local.json enabledMcpjsonServers)
+#   Codex CLI     <repo>\.codex\config.toml
+#   Antigravity   <repo>\.agents\mcp_config.json
+# Claude Code never reads %USERPROFILE%\.claude\mcp.json; its user scope is managed
+# with `claude mcp add-json --scope user`, so no user-scope file path is offered for it.
+# Environment overrides (used by the regression tests) win over every scope.
 function Get-ClaudeMcpConfigPath {
     [CmdletBinding()]
     param()
@@ -694,33 +749,74 @@ function Get-ClaudeMcpConfigPath {
     if (-not [string]::IsNullOrWhiteSpace($env:CLAUDE_MCP_CONFIG)) {
         return $env:CLAUDE_MCP_CONFIG
     }
-    $profilePath = Get-ReverseUserProfilePath
-    return Join-Path (Join-Path $profilePath '.claude') 'mcp.json'
+    return Join-Path (Get-ReverseRepoRoot) '.mcp.json'
+}
+
+function Get-ClaudeSettingsLocalPath {
+    [CmdletBinding()]
+    param()
+
+    if (-not [string]::IsNullOrWhiteSpace($env:CLAUDE_SETTINGS_LOCAL)) {
+        return $env:CLAUDE_SETTINGS_LOCAL
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:CLAUDE_MCP_CONFIG)) {
+        # A redirected .mcp.json (tests, scratch installs) keeps its approval file beside it
+        # instead of touching the repository's own .claude\settings.local.json.
+        return Join-Path (Join-Path (Split-Path -Path $env:CLAUDE_MCP_CONFIG -Parent) '.claude') 'settings.local.json'
+    }
+    return Join-Path (Join-Path (Get-ReverseRepoRoot) '.claude') 'settings.local.json'
+}
+
+function Get-ClaudeUserConfigPath {
+    [CmdletBinding()]
+    param()
+
+    # Read-only: Claude Code stores user-scope mcpServers at the top level of ~/.claude.json.
+    return Join-Path (Get-ReverseUserProfilePath) '.claude.json'
 }
 
 function Get-CodexConfigPath {
     [CmdletBinding()]
-    param()
+    param(
+        [ValidateSet('Project', 'User')]
+        [string]$Scope = 'Project'
+    )
 
     if (-not [string]::IsNullOrWhiteSpace($env:CODEX_CONFIG_PATH)) {
         return $env:CODEX_CONFIG_PATH
     }
-    $profilePath = Get-ReverseUserProfilePath
-    return Join-Path (Join-Path $profilePath '.codex') 'config.toml'
+    if ($Scope -eq 'User') {
+        $codexHome = if (-not [string]::IsNullOrWhiteSpace($env:CODEX_HOME)) { $env:CODEX_HOME } else { Join-Path (Get-ReverseUserProfilePath) '.codex' }
+        return Join-Path $codexHome 'config.toml'
+    }
+    return Join-Path (Join-Path (Get-ReverseRepoRoot) '.codex') 'config.toml'
 }
 
-function Get-ClaudeMcpServerNames {
+function Get-AntigravityMcpConfigPath {
     [CmdletBinding()]
     param()
 
-    $configPath = Get-ClaudeMcpConfigPath
-    if (-not (Test-Path -LiteralPath $configPath)) {
+    if (-not [string]::IsNullOrWhiteSpace($env:ANTIGRAVITY_MCP_CONFIG)) {
+        return $env:ANTIGRAVITY_MCP_CONFIG
+    }
+    return Join-Path (Join-Path (Get-ReverseRepoRoot) '.agents') 'mcp_config.json'
+}
+
+function Get-ReverseJsonMcpServerNames {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Path
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
         return @()
     }
 
     try {
-        $json = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($null -eq $json.mcpServers) {
+        $json = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($null -eq $json -or -not $json.PSObject.Properties['mcpServers'] -or $null -eq $json.mcpServers) {
             return @()
         }
         return @($json.mcpServers.PSObject.Properties.Name)
@@ -730,23 +826,78 @@ function Get-ClaudeMcpServerNames {
     }
 }
 
+function Get-ClaudeMcpServerNames {
+    [CmdletBinding()]
+    param()
+
+    $names = @(Get-ReverseJsonMcpServerNames -Path (Get-ClaudeMcpConfigPath))
+    if ([string]::IsNullOrWhiteSpace($env:CLAUDE_MCP_CONFIG)) {
+        $names += @(Get-ReverseJsonMcpServerNames -Path (Get-ClaudeUserConfigPath))
+    }
+    return @($names | Sort-Object -Unique)
+}
+
+function Get-AntigravityMcpServerNames {
+    [CmdletBinding()]
+    param()
+
+    return @(Get-ReverseJsonMcpServerNames -Path (Get-AntigravityMcpConfigPath))
+}
+
+function ConvertFrom-CodexMcpServerHeader {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Line
+    )
+
+    # Matches [mcp_servers.name], [mcp_servers."name"], [mcp_servers.'name'] and
+    # returns the unquoted server name. Sub-tables such as
+    # [mcp_servers."name".env] or [mcp_servers.name.tools.x] return $null.
+    $pattern = '^\s*\[\s*mcp_servers\s*\.\s*(?:"(?<dq>[^"]+)"|''(?<sq>[^'']+)''|(?<bare>[A-Za-z0-9_-]+))\s*\]\s*(?:#.*)?$'
+    $match = [regex]::Match($Line, $pattern)
+    if (-not $match.Success) {
+        return $null
+    }
+    foreach ($group in @('dq', 'sq', 'bare')) {
+        if ($match.Groups[$group].Success) {
+            return $match.Groups[$group].Value
+        }
+    }
+    return $null
+}
+
+function Get-CodexMcpServerNamesFromFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Path
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+        return @()
+    }
+
+    $names = @()
+    foreach ($line in @(Get-Content -LiteralPath $Path -Encoding UTF8)) {
+        $name = ConvertFrom-CodexMcpServerHeader -Line $line
+        if ($null -ne $name) {
+            $names += $name
+        }
+    }
+    return @($names | Sort-Object -Unique)
+}
+
 function Get-CodexMcpServerNames {
     [CmdletBinding()]
     param()
 
-    $configPath = Get-CodexConfigPath
-    if (-not (Test-Path -LiteralPath $configPath)) {
-        return @()
+    $names = @(Get-CodexMcpServerNamesFromFile -Path (Get-CodexConfigPath -Scope Project))
+    if ([string]::IsNullOrWhiteSpace($env:CODEX_CONFIG_PATH)) {
+        $names += @(Get-CodexMcpServerNamesFromFile -Path (Get-CodexConfigPath -Scope User))
     }
-
-    $pattern = '^\[mcp_servers\.([^\].]+)\]\s*$'
-    $names = @()
-    foreach ($match in Select-String -LiteralPath $configPath -Pattern $pattern) {
-        if ($match.Matches.Count -gt 0) {
-            $names += $match.Matches[0].Groups[1].Value
-        }
-    }
-
     return @($names | Sort-Object -Unique)
 }
 
@@ -754,10 +905,32 @@ function Get-ReverseMcpServerNames {
     [CmdletBinding()]
     param()
 
+    # refresh-tool-index calls this once per tool and capability; parsing the user-scope
+    # ~/.claude.json each time costs ~0.2 s, so cache per process keyed on file mtimes.
+    $sources = @(
+        (Get-ClaudeMcpConfigPath),
+        $(if ([string]::IsNullOrWhiteSpace($env:CLAUDE_MCP_CONFIG)) { Get-ClaudeUserConfigPath } else { '' }),
+        (Get-CodexConfigPath -Scope Project),
+        $(if ([string]::IsNullOrWhiteSpace($env:CODEX_CONFIG_PATH)) { Get-CodexConfigPath -Scope User } else { '' }),
+        (Get-AntigravityMcpConfigPath)
+    )
+    $signature = ($sources | ForEach-Object {
+        if ([string]::IsNullOrWhiteSpace($_)) { '-' }
+        elseif (Test-Path -LiteralPath $_) { '{0}|{1}' -f $_, (Get-Item -LiteralPath $_).LastWriteTimeUtc.Ticks }
+        else { '{0}|missing' -f $_ }
+    }) -join ';'
+    $cache = Get-Variable -Name 'ReverseMcpServerNamesCache' -Scope Script -ErrorAction SilentlyContinue
+    if ($cache -and $cache.Value -and $cache.Value.Signature -eq $signature) {
+        return @($cache.Value.Names)
+    }
+
     $names = @()
     $names += @(Get-ClaudeMcpServerNames)
     $names += @(Get-CodexMcpServerNames)
-    return @($names | Sort-Object -Unique)
+    $names += @(Get-AntigravityMcpServerNames)
+    $names = @($names | Sort-Object -Unique)
+    $script:ReverseMcpServerNamesCache = @{ Signature = $signature; Names = $names }
+    return $names
 }
 
 function Test-ReverseTcpPort {

@@ -26,7 +26,8 @@ if [[ -z "$TOOLS_ROOT" || "$TOOLS_ROOT" == "/" || "$TOOLS_ROOT" == "$HOME" ]]; t
   echo "Unsafe REVERSE_SKILL_TOOLS_DIR: $TOOLS_ROOT" >&2
   exit 2
 fi
-CLAUDE_MCP_CONFIG_PATH="${CLAUDE_MCP_CONFIG:-$HOME/.claude/mcp.json}"
+# Claude Code reads project-scope <repo>/.mcp.json (gitignored); it never reads ~/.claude/mcp.json.
+CLAUDE_MCP_CONFIG_PATH="${CLAUDE_MCP_CONFIG:-$REPO_ROOT/.mcp.json}"
 CODEX_MCP_CONFIG_PATH="${CODEX_CONFIG_PATH:-$HOME/.codex/config.toml}"
 MCP_HOST_TARGET="none"
 MANIFEST_PATH="$SCRIPT_DIR/bootstrap-manifest.json"
@@ -195,7 +196,9 @@ Examples:
 Notes:
   - This script supports Linux and macOS.
   - MCP host registration is opt-in. The default is --mcp-host=none and does not write client-global config.
-  - Explicit Claude registration uses CLAUDE_MCP_CONFIG or ~/.claude/mcp.json.
+  - Explicit Claude registration uses CLAUDE_MCP_CONFIG or the project-scope <repo>/.mcp.json
+    (gitignored; Claude Code never reads ~/.claude/mcp.json). For user scope use
+    `claude mcp add-json <name> '<json>' --scope user` instead.
   - Explicit Codex registration uses CODEX_CONFIG_PATH or ~/.codex/config.toml.
   - Override install root with REVERSE_SKILL_TOOLS_DIR=~/tools.
 EOF
@@ -515,6 +518,8 @@ if path.exists():
         data = {}
 else:
     data = {}
+# Claude Code needs an explicit transport on every .mcp.json entry.
+payload.setdefault('type', 'http' if 'url' in payload else 'stdio')
 data.setdefault('mcpServers', {})[name] = payload
 path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
 PY

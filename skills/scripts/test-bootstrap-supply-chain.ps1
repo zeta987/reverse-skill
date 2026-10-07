@@ -52,6 +52,35 @@ try {
     Assert-True (-not (Test-Path $failedTarget)) 'failed fetch poisoned final path'
     Assert-True (@(Get-ChildItem $scratch -Filter '.reverse-bootstrap-*').Count -eq 0) 'failed fetch left staging path'
 
+    # core.autocrlf=true at system level (Git for Windows default) must not make a pinned
+    # checkout with CRLF content look dirty. GIT_CONFIG_* simulates that system setting;
+    # explicit `git -c` options (which the bootstrap uses) take precedence over it.
+    $crlfSource = Join-Path $scratch 'crlf-source'
+    New-Item -ItemType Directory -Path $crlfSource | Out-Null
+    Invoke-Git -Arguments @('-C', $crlfSource, 'init', '--quiet')
+    Invoke-Git -Arguments @('-C', $crlfSource, 'config', 'user.email', 'test@example.invalid')
+    Invoke-Git -Arguments @('-C', $crlfSource, 'config', 'user.name', 'test')
+    Invoke-Git -Arguments @('-C', $crlfSource, 'config', 'core.autocrlf', 'false')
+    [IO.File]::WriteAllBytes((Join-Path $crlfSource 'payload.txt'), [Text.Encoding]::ASCII.GetBytes("crlf line`r`nmixed line`nlast`r`n"))
+    Invoke-Git -Arguments @('-C', $crlfSource, 'add', 'payload.txt')
+    Invoke-Git -Arguments @('-C', $crlfSource, 'commit', '--quiet', '-m', 'crlf fixture')
+    $crlfPin = (& git -C $crlfSource rev-parse HEAD).Trim()
+    $crlfTarget = Join-Path $scratch 'crlf-installed'
+    $env:GIT_CONFIG_COUNT = '1'
+    $env:GIT_CONFIG_KEY_0 = 'core.autocrlf'
+    $env:GIT_CONFIG_VALUE_0 = 'true'
+    try {
+        Ensure-GitCloneInstall -Definition ([pscustomobject]@{ repo = $crlfSource; pinnedCommit = $crlfPin }) -TargetPath $crlfTarget | Out-Null
+        Ensure-GitCloneInstall -Definition ([pscustomobject]@{ repo = $crlfSource; pinnedCommit = $crlfPin }) -TargetPath $crlfTarget | Out-Null
+    }
+    finally {
+        Remove-Item Env:GIT_CONFIG_COUNT, Env:GIT_CONFIG_KEY_0, Env:GIT_CONFIG_VALUE_0 -ErrorAction SilentlyContinue
+    }
+    Assert-True ((& git -C $crlfTarget rev-parse HEAD).Trim() -eq $crlfPin) 'CRLF checkout under system autocrlf=true was refused'
+    Assert-True ((& git -C $crlfTarget config --local core.autocrlf).Trim() -eq 'false') 'pinned checkout did not persist core.autocrlf=false'
+    $payloadBytes = [IO.File]::ReadAllBytes((Join-Path $crlfTarget 'payload.txt'))
+    Assert-True (([Text.Encoding]::ASCII.GetString($payloadBytes)) -eq "crlf line`r`nmixed line`nlast`r`n") 'pinned checkout content was line-ending converted'
+
     $raceTarget = Join-Path $scratch 'race'
     $raceStage = Join-Path $scratch '.reverse-bootstrap-race'
     New-Item -ItemType Directory -Path $raceTarget, $raceStage | Out-Null
