@@ -21,9 +21,24 @@ Go 1.27, Gradle 9.3, JDK 21, VS Community 2026).
 | pentestswarm | go-install + MCP | Installed, **not registered** in any client | `pentestswarm doctor` requires its API server (8080), Redis, Docker and Ollama first |
 | idapro (HTTP) | register `http://127.0.0.1:13337/mcp` | Not registered; the stdio proxy `ida-pro-mcp` already targets the same backend | Double registration of one backend is what `docs/mcp/codex.md` warns against |
 
-Tool-index rows for these still read from `Get-Command`/fixed paths and show them as
-available, but a fresh `bootstrap-reverse.ps1` run will hit the same failures until
-the manifest is fixed.
+Status after the 2026-10-08 fork fixes (branch `dev/windows-mcp-clients`):
+
+| Deviation | Fork change |
+|---|---|
+| binwalk | manifest `bootstrapKind: cargo-install`, `cargoCrate: binwalk`, `pinnedVersion: 3.1.0`; bootstrap runs `cargo install --locked binwalk --version 3.1.0`, tool index probes `~\.cargo\bin\binwalk.exe` |
+| pwntools | `verifyCommand: pwn`, `uvPython: "3.13"`; bootstrap prefers `uv tool install --python 3.13 pwntools==4.15.0`, index probes `~\.local\bin\pwn.exe` |
+| bkcrack | `Expand-ArchiveIntoDirectory` wraps `Get-ChildItem` in `@()`; the single-top-directory zip now extracts under `Set-StrictMode` |
+| seclists | `Ensure-GitCloneInstall` runs `git -c core.autocrlf=false` for init/fetch/checkout/status and persists `core.autocrlf=false` in the checkout. The existing host checkout stays dirty because Defender removed 11 payload files; do not restore them |
+| proxycat | `postInstallSteps` are now emitted as `[post-install]` warnings and in the results JSON (`post_install_steps`); the dependency install itself is still manual |
+| anything-analyzer | `Test-VsBuildToolsInstalled` asks `vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64` first, so VS 2026 Community counts |
+| idapro (HTTP) | unchanged: still a second alias of the stdio-proxied backend |
+| burpsuite-mcp | manifest now registers the stdio bridge `node <repo>\burp-mcp-full\mcp-bridge.js` instead of `http://localhost:9876/mcp` |
+| ghidra-mcp | manifest describes the GhydraMCP path (user extension, loopback patch, `ghydra-stdio.py`, REST from 8192) instead of LaurieWired 8765 |
+
+Registration scope: `bootstrap-reverse.ps1 -McpHostTarget Claude|Codex|Antigravity|Both|All`
+now writes the project-scope files listed below (`-McpScope Project`, default). Claude Code
+never read `%USERPROFILE%\.claude\mcp.json`; `-McpScope User` goes through
+`claude mcp add-json --scope user` instead.
 
 ## Client registration mirror
 
@@ -46,10 +61,12 @@ need the `legacy-mcp-stdio.py` wrapper that the Python `mcp==1.6.0` bridges need
 
 ### IDA (ida-pro-mcp 2.0.0, idalib headless)
 
-The installed `ida_pro_mcp` 2.0.0 has `idalib_server` but **no `idalib_supervisor`**,
-so `skills/ida-reverse/scripts/start.ps1`, `watchdog.ps1` and `install-autostart.ps1`
-do not apply to this host (start.ps1 also stalls for minutes in
-`Get-ManagedSupervisorProcessIds`, one WMI query per process). Use:
+The installed `ida_pro_mcp` 2.0.0 has `idalib_server` but **no `idalib_supervisor`**.
+`skills/ida-reverse/scripts/start.ps1` now detects the module per interpreter and falls
+back to `idalib_server --host 127.0.0.1 --port 13337 --unsafe`, and
+`Get-ManagedSupervisorProcessIds` enumerates `Win32_Process` once (about 1.3 s here
+instead of one WMI query per process); `watchdog.ps1` / `install-autostart.ps1` inherit
+both fixes because they only call `start.ps1`. The supported path for this host remains:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File skills\scripts\mcp\start-local-backend.ps1 `
@@ -62,6 +79,14 @@ Requires User env `IDADIR=C:\Program Files\IDA Professional 9.0`. Verified
 2026-10-08: 42 tools on `127.0.0.1:13337`; the Claude Code proxy reported connected.
 Codex uses the identical proxy command line but was not exercised live.
 The backend is a plain process; it does not survive logoff.
+
+The earlier observation that the script "ran past 120 s although the backend was
+healthy within seconds" was **not reproduced** after the fork fixes: the reuse path
+returns in about 1 s under both Windows PowerShell 5.1 and pwsh 7, and the fixture
+test `skills/scripts/test-mcp-backend-start.py` shows the new-start path returning in
+about 1.3 s. The health probe now uses a direct `HttpWebRequest` with `Proxy = $null`
+(Windows PowerShell's `Invoke-RestMethod` can stall on proxy auto-detection), and the
+JSON output carries `elapsed_ms` so a future stall can be attributed.
 
 ### Ghidra (GhydraMCP v2.2.0-rc.2, loopback-patched)
 
@@ -92,10 +117,17 @@ trailing slash in `X64DBG_URL`.
 
 ## Index artefacts to know about
 
-- `skills/tool-index.md` marks `ida` as missing because `refresh-tool-index.ps1`
-  only probes `Get-Command ida`; IDA Pro 9.0 is installed at
-  `C:\Program Files\IDA Professional 9.0`.
-- `apksigner`/`zipalign` show missing for the same reason; they live in the Android
-  SDK `build-tools\36.1.0` and `rebuild-sign-install.ps1` finds them itself.
-- `jshookmcp`/`xquik-mcp` show "MCP 已注册 —" because the index reads only the
-  global client configs, not the project-scope files above.
+All three were fixed in the fork on 2026-10-08; they are kept here as the record of
+why the probes exist:
+
+- `ida` used to be reported missing because `refresh-tool-index.ps1` only probed
+  `Get-Command ida`. The catalog now also probes `%IDADIR%\ida.exe|ida64.exe` and
+  `C:\Program Files\IDA Professional 9.0\ida.exe|ida64.exe` (IDA 9.0 ships only
+  `ida.exe`; `ida64.exe` is kept for older layouts).
+- `apksigner`/`zipalign` are now resolved from the highest Android SDK
+  `build-tools\<version>` under `ANDROID_HOME`, `ANDROID_SDK_ROOT` or
+  `%LOCALAPPDATA%\Android\Sdk` (36.1.0 on this host).
+- "MCP 已注册" now reads the project-scope `.mcp.json`, `.codex/config.toml` and
+  `.agents/mcp_config.json` in addition to the Codex/Claude user configs, so
+  `jshookmcp`/`xquik-mcp` are recognised. The capability table separator also has
+  eight columns again.
