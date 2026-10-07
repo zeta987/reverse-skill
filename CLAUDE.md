@@ -40,3 +40,7 @@ Read `README_AI.md` for full bootstrap sequence.
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File skills/scripts/verify-routing-coherence.ps1
 ```
+
+## Fork policy
+
+This is a private fork for the owner's own use. Never open pull requests or issues against the upstream project from here. Record install/manifest deviations in `docs/mcp/host-deviations.md` and fix the manifest in this fork.

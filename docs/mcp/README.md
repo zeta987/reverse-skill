@@ -184,3 +184,5 @@ assume arithmetic above `2^53 - 1` is exact.
 Local readiness reports and machine-specific configurations belong in ignored
 `work/` artifacts. Portable documentation must not embed a user's credentials
 or silently activate a different client's configuration.
+
+Machine-specific install deviations and the backend runbook for this fork live in [host-deviations.md](host-deviations.md).

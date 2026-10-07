@@ -29,6 +29,9 @@ implementation-notes.md
 .claude/
 # Local Codex MCP paths are machine-specific; the adapter is optional.
 .codex/config.toml
+# Claude Code and Antigravity project MCP configs carry this machine's absolute paths.
+.mcp.json
+.agents/mcp_config.json
 # Repo-owned DSH presets contain this machine's MCP executable paths.
 .dsh/agent-presets/
 # Local Issue/PR review exports; do not commit GitHub discussion snapshots.
