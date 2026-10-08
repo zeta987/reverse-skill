@@ -309,7 +309,7 @@
     {
       "name": "pentestswarm",
       "bootstrapKind": "go-install",
-      "goPackage": "github.com/Armur-Ai/Pentest-Swarm-AI/cmd/pentestswarm@v0.1.0",
+      "goPackage": "github.com/Armur-Ai/Pentest-Swarm-AI/cmd/pentestswarm@v0.2.31",
       "fallbackKind": "docker-image",
       "dockerImage": "ghcr.io/armur-ai/pentestswarm:v0.1.0",
       "mcpNames": [
@@ -327,8 +327,8 @@
       "canAutoInstall": true,
       "verifyCommand": "pentestswarm",
       "verificationMode": "service-or-registration",
-      "note": "群体智能渗透框架。需要 Go 1.24+ 或 Docker。不新购任何付费 provider：provider claude 经所有者自己的中继（启动器把 orchestrator.endpoint 作为 ANTHROPIC_BASE_URL 只放进子进程环境；key 只在 User 环境变量 PENTESTSWARM_ORCHESTRATOR_API_KEY，不进 config.yaml 与仓库）、provider openai（需 v0.2.31+，v0.1.0 没有）或 provider ollama（本地模型，无 key）。配置 %USERPROFILE%\\.pentestswarm\\config.yaml。客户端以 stdio 注册 <bridge-python> skills/scripts/mcp/pentestswarm-stdio.py：启动器只读校验 config.yaml（host 127.0.0.1、provider claude/openai/ollama、api_key 空），claude/openai 时从进程或 HKCU 环境取 key 交给子进程，ollama 时按需拉起 ollama serve（127.0.0.1:11434），再在同一 stdio 上 exec pentestswarm mcp serve；--ensure-api-server（pentestswarm serve，健康检查 GET http://127.0.0.1:8080/api/v1/health）与 --redis-port 6379 只为 doctor 存在；不依赖进程环境里的 APPDATA/LOCALAPPDATA/PATH（回退到注册表）。bootstrap 不自动写入此条目，客户端片段见 docs/mcp/host-deviations.md。",
-      "pinnedVersion": "v0.1.0"
+      "note": "群体智能渗透框架。需要 Go 1.24+ 或 Docker。不新购任何付费 provider：provider claude 经所有者自己的中继（启动器把 orchestrator.endpoint 作为 ANTHROPIC_BASE_URL 只放进子进程环境；key 只在 User 环境变量 PENTESTSWARM_ORCHESTRATOR_API_KEY，不进 config.yaml 与仓库）、provider openai（本机采用；v0.2.31+ 才有，v0.1.0 没有）或 provider ollama（本地模型，无 key）。Docker 回退镜像标签仍为 v0.1.0：ghcr.io 对匿名 token 回 403，无法确认 v0.2.31 镜像存在。配置 %USERPROFILE%\\.pentestswarm\\config.yaml。客户端以 stdio 注册 <bridge-python> skills/scripts/mcp/pentestswarm-stdio.py：启动器只读校验 config.yaml（host 127.0.0.1、provider claude/openai/ollama、api_key 空），claude/openai 时从进程或 HKCU 环境取 key 交给子进程，ollama 时按需拉起 ollama serve（127.0.0.1:11434），再在同一 stdio 上 exec pentestswarm mcp serve；--ensure-api-server（pentestswarm serve，健康检查 GET http://127.0.0.1:8080/api/v1/health）与 --redis-port 6379 只为 doctor 存在；不依赖进程环境里的 APPDATA/LOCALAPPDATA/PATH（回退到注册表）。bootstrap 不自动写入此条目，客户端片段见 docs/mcp/host-deviations.md。",
+      "pinnedVersion": "v0.2.31"
     },
     {
       "name": "binwalk",

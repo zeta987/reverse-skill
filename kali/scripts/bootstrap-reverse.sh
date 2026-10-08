@@ -509,7 +509,7 @@ ensure_capability() {
                 log_ok "pentestswarm 已可用"
             elif command -v go &>/dev/null; then
                 log_info "go install pentestswarm ..."
-                go install github.com/Armur-Ai/Pentest-Swarm-AI/cmd/pentestswarm@v0.1.0
+                go install github.com/Armur-Ai/Pentest-Swarm-AI/cmd/pentestswarm@v0.2.31
             elif command -v docker &>/dev/null; then
                 log_info "拉取 pentestswarm Docker 镜像 ..."
                 docker pull ghcr.io/armur-ai/pentestswarm:v0.1.0
@@ -517,7 +517,7 @@ ensure_capability() {
             else
                 log_warn "需要 Go 1.24+ 或 Docker 来安装 pentestswarm"
                 log_info "安装 Go: apt install golang-go"
-                log_info "然后: go install github.com/Armur-Ai/Pentest-Swarm-AI/cmd/pentestswarm@v0.1.0"
+                log_info "然后: go install github.com/Armur-Ai/Pentest-Swarm-AI/cmd/pentestswarm@v0.2.31"
                 return 1
             fi
             register_mcp_server "pentestswarm" '{

@@ -18,7 +18,7 @@ Go 1.27, Gradle 9.3, JDK 21, VS Community 2026).
 | seclists | git-clone at pinned commit | `git fetch --depth 1 <pinned>` with `-c core.autocrlf=false`; 11 payload files (EICAR, zip bombs, web shells) were removed by Defender and must not be restored | System-level `core.autocrlf=true` made the fresh checkout look dirty, so bootstrap refused it |
 | proxycat | git-clone + manual pip | Dependencies in `%USERPROFILE%\Tools\ProxyCat\.venv` (uv, Python 3.13); launcher `%USERPROFILE%\Tools\bin\proxycat.bat` | `postInstallSteps` are never executed by any script |
 | anything-analyzer | local-http-mcp, auto | **Not installed.** | `Test-VsBuildToolsInstalled` only checks the VS 2022 BuildTools folders and would winget-install them although VS 2026 with VC tools is present |
-| pentestswarm | go-install + MCP, "needs Claude/Ollama API key" | Installed (v0.1.0); registered as the stdio launcher `pentestswarm-stdio.py` (see the runbook below); provider `claude` routed to the owner's relay through `ANTHROPIC_BASE_URL` in the child environment only, key only in the User environment | v0.1.0 has no `openai` provider (claude/ollama/lmstudio only); the owner chose the `claude` provider + relay over an upgrade. v0.1.0's `mcp serve` runs the swarm engine in-process and never opens Postgres or Redis; `doctor` only dials the ports |
+| pentestswarm | go-install `@v0.1.0` + MCP, "needs Claude/Ollama API key" | **Upgraded to v0.2.31** (`go install …@v0.2.31` on 2026-10-08, module version confirmed with `go version -m`; the binary still prints `version dev`); registered as the stdio launcher `pentestswarm-stdio.py` (see the runbook below); provider `openai` = the owner's OpenAI-compatible relay, key only in the User environment | v0.1.0 had no `openai` provider (claude/ollama/lmstudio only); v0.2.31 adds it. Manifest pin bumped to v0.2.31 in both manifests and the Kali bootstrap. `mcp serve` runs the swarm engine in-process and never opens Postgres or Redis; `doctor` only dials the ports |
 | idapro (HTTP) | register `http://127.0.0.1:13337/mcp` | Not registered; the stdio proxy `ida-pro-mcp` already targets the same backend | Double registration of one backend is what `docs/mcp/codex.md` warns against |
 
 Status after the 2026-10-08 fork fixes (branch `dev/windows-mcp-clients`):
@@ -316,13 +316,17 @@ and a client whose process environment predates the current token gets 401 until
 that is exactly what happened on 2026-10-08 (process value ≠ User value while both config
 copies matched the User value).
 
-### Pentest Swarm AI (pentestswarm v0.1.0, free local stack)
+### Pentest Swarm AI (pentestswarm v0.2.31 on the owner's relay)
 
-`%USERPROFILE%\go\bin\pentestswarm.exe` reports `version dev` (the `go install …@v0.1.0`
-build has no ldflags); the module cache holds the matching source under
-`%USERPROFILE%\go\pkg\mod\github.com\!armur-!ai\!pentest-!swarm-!a!i@v0.1.0`, which is what
-every statement below was read from. Three upstream facts override the manifest's old
-"needs Claude/Ollama API key" note and the `doctor` wording:
+Installed binary: v0.2.31 since 2026-10-08 (`go install github.com/Armur-Ai/Pentest-Swarm-AI/cmd/pentestswarm@v0.2.31`
+over the v0.1.0 build in `%USERPROFILE%\go\bin`; `go version -m` shows `mod … v0.2.31`, while
+`--version` still prints `version dev` because the `go install` build has no ldflags). The
+statements below were read from the v0.1.0 module cache
+(`%USERPROFILE%\go\pkg\mod\github.com\!armur-!ai\!pentest-!swarm-!a!i@v0.1.0`) and re-checked
+against the v0.2.31 sources: `cli/mcp.go` is identical, `internal/mcp/server.go` differs only in
+struct-tag whitespace, `internal/mcp/tools.go` has the same five tools (`explain_finding` is still
+canned text), and `cli/doctor.go` has the same eight infra checks. Three upstream facts override
+the manifest's old "needs Claude/Ollama API key" note and the `doctor` wording:
 
 1. **`mcp serve` is self-contained.** `cli/mcp.go` → `mcp.RegisterDefaultTools(server, cfg)`
    → `engine.NewRunner(cfg)` with `memory.NewMemoryStore()`; the five tools run the swarm
@@ -413,8 +417,8 @@ health `GET <endpoint>/models`) exists from upstream v0.2.x (`internal/llm/opena
 v0.2.31, factory case at line 81; `cli/mcp.go` and `internal/mcp/server.go` are the same shape:
 five tools, same handler cases). With v0.1.0 the stdio smoke still passes (`mcp serve` only
 `Load`s the config, it never `Validate`s), but `scan_target`/`quick_recon` would fail at call
-time with `unknown provider "openai"`. Owner decision (2026-10-08, round 4): stay on v0.1.0 and route the relay through the **`claude`
-provider**: `orchestrator.provider "claude"`, `model "claude-sonnet-5-5"` (the parent session
+time with `unknown provider "openai"`. Round 4 (superseded by round 5 below, kept for the facts): the owner briefly chose to stay on
+v0.1.0 and route the relay through the **`claude` provider**: `orchestrator.provider "claude"`, `model "claude-sonnet-5-5"` (the parent session
 verified `POST /v1/messages` on the relay with `x-api-key` + `anthropic-version 2023-06-01`
 returns 200 for `claude-sonnet-5-5` and `claude-haiku-5-5`, and a tools request answered
 `stop_reason tool_use` with a well-formed block; only a forced `tool_choice: {"type":"tool"}`
@@ -439,6 +443,26 @@ permission classifier refused to write the `claude`+relay shape into
 still holds the earlier `openai` shape until the owner writes or approves the four-line change
 (`provider: "claude"`, `model: "claude-sonnet-5-5"`, `endpoint: "https://<relay-host>"`,
 `context_window: 200000`); the launchers, tests and docs already support it.
+
+**Round 5 decision (final, 2026-10-08): option A.** The owner chose the upgrade: v0.2.31 installed
+as above, manifest pin bumped (`goPackage …@v0.2.31`, `pinnedVersion v0.2.31`; the Docker fallback
+tag stays `v0.1.0` because ghcr.io answered 403 to the anonymous token flow for every tag, so no
+v0.2.31 image could be confirmed), provider **`openai`** with `endpoint
+https://<relay-host>/v1`, `model gpt-6.1-sol`, key only via
+`PENTESTSWARM_ORCHESTRATOR_API_KEY` — exactly the config.yaml already on disk. Redis: **skipped
+entirely** at the owner's request (no Memurai retry, no Docker redis); the `doctor` Redis leg
+stays red by design. The `claude` provider support in both launchers remains (tested) but is
+unused. Verified on v0.2.31 (2026-10-08): `doctor` 5/8 (API ❌ `serve` kept stopped, Redis ❌
+skipped, Ollama ❌ unused, Postgres/Docker/Go/disk/RAM ✅); live stdio smoke through
+`pentestswarm-stdio.py` → 4 frames + the stray notification error, `server/discover` → `-32601`
+(no `legacy-mcp-stdio.py` for dsh), `ping` → `-32601`, **5 tools with schemas byte-identical to
+the v0.1.0 capture**, and the MCP child (pid from the launcher log) owned **no LISTENING socket**
+while alive. Provider-path proof: v0.2.31 offers no tool, dry-run or CLI command that reaches the
+LLM without a target (`explain_finding` is canned, `config validate` is a TODO stub that only
+checks `./config.yaml` exists, `quickstart`/`doctor` never call the provider, `demo` is explicitly
+"no network, no LLM"), so it was **not** run; the direct relay probe above (`gpt-6.1-sol`: HTTP 200
+with a well-formed tool call on `/v1/chat/completions`, `GET /v1/models` 200) is the only
+provider evidence.
 
 #### Agent-controlled start (same contract as the other backends)
 

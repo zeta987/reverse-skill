@@ -515,7 +515,7 @@
     {
       "name": "pentestswarm",
       "bootstrapKind": "go-install",
-      "goPackage": "github.com/Armur-Ai/Pentest-Swarm-AI/cmd/pentestswarm@v0.1.0",
+      "goPackage": "github.com/Armur-Ai/Pentest-Swarm-AI/cmd/pentestswarm@v0.2.31",
       "fallbackKind": "docker-image",
       "dockerImage": "ghcr.io/armur-ai/pentestswarm:v0.1.0",
       "mcpNames": [
@@ -535,7 +535,7 @@
         "redis"
       ],
       "kaliNote": "群体智能渗透框架。go install 或 Docker 运行。支持 MCP server 模式（pentestswarm mcp serve）。provider ollama 时不需要任何 API key（本地 Ollama + 可工具调用的模型，如 llama3.1:8b）；openai（v0.2.x 起，OpenAI 相容端点）/claude 等 provider 的 key 只放环境变量 PENTESTSWARM_ORCHESTRATOR_API_KEY。",
-      "pinnedVersion": "v0.1.0"
+      "pinnedVersion": "v0.2.31"
     },
     {
       "name": "coercer",
