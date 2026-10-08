@@ -18,7 +18,7 @@ Go 1.27, Gradle 9.3, JDK 21, VS Community 2026).
 | seclists | git-clone at pinned commit | `git fetch --depth 1 <pinned>` with `-c core.autocrlf=false`; 11 payload files (EICAR, zip bombs, web shells) were removed by Defender and must not be restored | System-level `core.autocrlf=true` made the fresh checkout look dirty, so bootstrap refused it |
 | proxycat | git-clone + manual pip | Dependencies in `%USERPROFILE%\Tools\ProxyCat\.venv` (uv, Python 3.13); launcher `%USERPROFILE%\Tools\bin\proxycat.bat` | `postInstallSteps` are never executed by any script |
 | anything-analyzer | local-http-mcp, auto | **Not installed.** | `Test-VsBuildToolsInstalled` only checks the VS 2022 BuildTools folders and would winget-install them although VS 2026 with VC tools is present |
-| pentestswarm | go-install + MCP, "needs Claude/Ollama API key" | Installed (v0.1.0); registered as the stdio launcher `pentestswarm-stdio.py` (see the runbook below); provider `openai` = the owner's OpenAI-compatible relay, key only in the User environment | v0.1.0 has no `openai` provider (claude/ollama/lmstudio only), so the relay needs the v0.2.31 binary — owner decision pending. v0.1.0's `mcp serve` runs the swarm engine in-process and never opens Postgres or Redis; `doctor` only dials the ports |
+| pentestswarm | go-install + MCP, "needs Claude/Ollama API key" | Installed (v0.1.0); registered as the stdio launcher `pentestswarm-stdio.py` (see the runbook below); provider `claude` routed to the owner's relay through `ANTHROPIC_BASE_URL` in the child environment only, key only in the User environment | v0.1.0 has no `openai` provider (claude/ollama/lmstudio only); the owner chose the `claude` provider + relay over an upgrade. v0.1.0's `mcp serve` runs the swarm engine in-process and never opens Postgres or Redis; `doctor` only dials the ports |
 | idapro (HTTP) | register `http://127.0.0.1:13337/mcp` | Not registered; the stdio proxy `ida-pro-mcp` already targets the same backend | Double registration of one backend is what `docs/mcp/codex.md` warns against |
 
 Status after the 2026-10-08 fork fixes (branch `dev/windows-mcp-clients`):
@@ -372,7 +372,7 @@ Host components (all free; nothing paid, no provider key anywhere):
 | Redis | `winget install Memurai.MemuraiDeveloper` (4.1.2, free developer edition, Windows service `Memurai`) — see the status line below | `doctor` dials 6379 only; both launchers treat a closed 6379 as a **warning** (they try `Start-Service`/`sc start Memurai` first) because v0.1.0 never opens Redis |
 | Ollama | `%LOCALAPPDATA%\Programs\Ollama\ollama.exe` 0.11.8 (not a service, no autostart) | launchers run `ollama serve` detached with `OLLAMA_HOST=127.0.0.1:11434`; model `llama3.1:8b` (the `pentestswarm config init` default; `internal/llm/ollama.go` names "Llama 3.1+" for tool calling; 4.92 GB from `registry.ollama.ai`) — see the status line below |
 | Docker | Desktop 29.8.2 running (autostart) | not needed by this stack; only the bundled labs use it |
-| config | `%USERPROFILE%\.pentestswarm\config.yaml` (viper's second search path after `./config.yaml`; both launchers pass `--config` explicitly because `HOME` is empty on Windows and Codex strips `USERPROFILE`) | `server.host 127.0.0.1`, `server.port 8080`, `orchestrator.provider openai`, `model gpt-6.1-sol`, `endpoint https://<relay-host>/v1`, `api_key ""` (User env only), `context_window 128000`, `database.*` as above with `password ""`, `redis 127.0.0.1:6379`, `intelligence.enabled false`. The earlier `ollama` shape (`model llama3.1:8b`, `endpoint http://127.0.0.1:11434`) stays supported by both launchers |
+| config | `%USERPROFILE%\.pentestswarm\config.yaml` (viper's second search path after `./config.yaml`; both launchers pass `--config` explicitly because `HOME` is empty on Windows and Codex strips `USERPROFILE`) | Target shape: `server.host 127.0.0.1`, `server.port 8080`, `orchestrator.provider claude`, `model claude-sonnet-5-5`, `endpoint https://<relay-host>` (→ `ANTHROPIC_BASE_URL`, child only), `api_key ""` (User env only), `context_window 200000`, `database.*` as above with `password ""`, `redis 127.0.0.1:6379`, `intelligence.enabled false`. The file on disk still carries the previous `openai` shape (write pending, see above). The `openai` (v0.2.x) and `ollama` shapes stay supported by both launchers |
 
 Status line (updated as the host steps land): Postgres role/db ✅, `config.yaml` ✅,
 `pentestswarm serve` verified once on 2026-10-08 through `pentestswarm-stdio.py --check-only
@@ -413,11 +413,32 @@ health `GET <endpoint>/models`) exists from upstream v0.2.x (`internal/llm/opena
 v0.2.31, factory case at line 81; `cli/mcp.go` and `internal/mcp/server.go` are the same shape:
 five tools, same handler cases). With v0.1.0 the stdio smoke still passes (`mcp serve` only
 `Load`s the config, it never `Validate`s), but `scan_target`/`quick_recon` would fail at call
-time with `unknown provider "openai"`. Options recorded for the owner: (A) `go install
-github.com/Armur-Ai/Pentest-Swarm-AI/cmd/pentestswarm@v0.2.31` + manifest pin bump (or into a
-side `GOBIN` with `--exe`), (B) stay on v0.1.0 with provider `claude` + `ANTHROPIC_BASE_URL`
-pointing at the relay's Anthropic-format endpoint (`gpt-6.1-sol` answered 200 there) — workable
-but it drives a non-Claude model through `claude.go`'s request shape. Neither is applied yet.
+time with `unknown provider "openai"`. Owner decision (2026-10-08, round 4): stay on v0.1.0 and route the relay through the **`claude`
+provider**: `orchestrator.provider "claude"`, `model "claude-sonnet-5-5"` (the parent session
+verified `POST /v1/messages` on the relay with `x-api-key` + `anthropic-version 2023-06-01`
+returns 200 for `claude-sonnet-5-5` and `claude-haiku-5-5`, and a tools request answered
+`stop_reason tool_use` with a well-formed block; only a forced `tool_choice: {"type":"tool"}`
+got HTTP 400, which `claude.go` never sends — it sets no `ToolChoice` at all), `api_key ""`,
+`orchestrator.endpoint "https://<relay-host>"` (no `/v1`: anthropic-sdk-go joins the base
+URL with the relative path `v1/messages`, `message.go:66`, and `option.WithBaseURL` adds the
+trailing slash). Env override name confirmed from `config.go:227-229`: `SetEnvPrefix("PENTESTSWARM")`
++ `.`→`_` replacer + `AutomaticEnv` → `orchestrator.api_key` is `PENTESTSWARM_ORCHESTRATOR_API_KEY`,
+and `cli/mcp.go` / `cli/serve.go` read that variable explicitly when the file value is empty, so
+the key never has to be in the file. `ANTHROPIC_BASE_URL` is read by the SDK's
+`DefaultClientOptions` (`client.go:34`) and is set by **both launchers in the child environment
+only**, from `orchestrator.endpoint` (which pentestswarm ignores for `claude`); an inherited
+`ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` is removed from every child,
+nothing is written at User or Machine scope (Claude Code itself reads `ANTHROPIC_BASE_URL`), and
+the PowerShell entrypoint uses `Remove-Item Env:` because under pwsh 7
+`SetEnvironmentVariable(name, $null)` leaves an empty-but-defined variable in `Start-Process`
+children, which would break the SDK. `claude.go` sends `cache_control` (`ttl` default `5m`,
+`claude.go:189`) on cached system prompts; whether the relay accepts that field is only known
+once a real tool call runs (see the status line). **Host config write pending:** this session's
+permission classifier refused to write the `claude`+relay shape into
+`%USERPROFILE%\.pentestswarm\config.yaml` (classified as traffic redirection), so the file
+still holds the earlier `openai` shape until the owner writes or approves the four-line change
+(`provider: "claude"`, `model: "claude-sonnet-5-5"`, `endpoint: "https://<relay-host>"`,
+`context_window: 200000`); the launchers, tests and docs already support it.
 
 #### Agent-controlled start (same contract as the other backends)
 
@@ -431,10 +452,10 @@ Defaults: `-Executable` = `pentestswarm` on PATH, else `%USERPROFILE%\go\bin\pen
 on PATH, else `%LOCALAPPDATA%\Programs\Ollama\ollama.exe`; `-OllamaPort 11434`; `-RedisPort 6379`
 (`0` skips either dependency). This PowerShell entrypoint is the **full** chain for `doctor` and the campaign CLI (the stdio
 launcher below starts only Ollama by default). Order: read-only `config.yaml` validation (`server.host`
-`127.0.0.1`, `server.port` == `-Port`, `provider` `ollama` or `openai`, empty `api_key`, non-empty
-`model`; `ollama` needs a loopback `endpoint` on `-OllamaPort`, `openai` needs an `https://` (or
-loopback) base URL and the key in the process or User environment; each failure has its own
-message and nothing is started) → Redis (service start attempt, then warning) → Ollama (only for
+`127.0.0.1`, `server.port` == `-Port`, `provider` `ollama`, `openai` or `claude`, empty `api_key`,
+non-empty `model`; `ollama` needs a loopback `endpoint` on `-OllamaPort`, `openai`/`claude` need an
+`https://` (or loopback) relay base URL — for `claude` without a `/v1` suffix — and the key in the
+process or User environment; each failure has its own message and nothing is started) → Redis (service start attempt, then warning) → Ollama (only for
 provider `ollama`) (`GET /api/tags`; reuse, else
 `ollama serve` detached + `Ollama-<stamp>.*` logs/record; a missing model is a warning naming
 `ollama pull <model>`) → API server (`GET /api/v1/health` must answer `service pentestswarm`;
@@ -455,9 +476,10 @@ PowerShell 5.1 and pwsh 7).
 
 Every client registers [`pentestswarm-stdio.py`](../../skills/scripts/mcp/pentestswarm-stdio.py)
 (standard-library Python, run by the tested bridge interpreter) as a **stdio** server. It does
-the same read-only validation, then only what `mcp serve` needs: for provider `openai` nothing
-local at all (the relay key is read from the process or User environment and handed to the
-child); for provider `ollama`, Ollama (reuse, or `ollama serve` detached with
+the same read-only validation, then only what `mcp serve` needs: for providers `openai`/`claude`
+nothing local at all (the relay key is read from the process or User environment and handed to
+the child; for `claude` the child also gets `ANTHROPIC_BASE_URL` from `orchestrator.endpoint`);
+for provider `ollama`, Ollama (reuse, or `ollama serve` detached with
 `OLLAMA_HOST=127.0.0.1:<port>`; a missing model is a warning). The API
 server leg (`--ensure-api-server`) and the Redis probe (`--redis-port 6379`) are opt-in and
 exist for `pentestswarm doctor`, not for the tools. Then it `exec`s
@@ -474,9 +496,12 @@ It needs **nothing from the process environment**: Codex hands MCP servers a fil
 environment, so `USERPROFILE` comes from `HKCU\Volatile Environment`, `APPDATA`/`LOCALAPPDATA`
 from `HKCU\...\Explorer\Shell Folders`, `SHGetKnownFolderPath` is the next fallback, and PATH is
 the union of the process PATH, `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment\Path`
-and `HKCU\Environment\Path` (`%VAR%` expanded). The resolved values are injected into the
-children (`USERPROFILE`, `HOMEDRIVE`/`HOMEPATH`, `APPDATA`, `LOCALAPPDATA`, `PATH`) because
-`os.UserHomeDir()` is used by the fp cache, NVD cache and `init`. Overrides: `--exe`/`PENTESTSWARM_EXE`,
+and `HKCU\Environment\Path` (`%VAR%` expanded). Like `repair_environment()` in
+`anything-analyzer-stdio.py` (dev 448b597) it repairs its own process first — `USERPROFILE`,
+`HOMEDRIVE`/`HOMEPATH`, `APPDATA`, `LOCALAPPDATA`, `SystemRoot`, `ProgramFiles`, `PATHEXT`, and the
+persisted PATH when `pentestswarm` is not found — never overriding what the client did pass, and
+the children inherit the repaired values because `os.UserHomeDir()` is used by the fp cache, NVD
+cache and `init`. Overrides: `--exe`/`PENTESTSWARM_EXE`,
 `--config`/`PENTESTSWARM_CONFIG`, `--port`, `--ollama-exe`, `--ollama-port` (0 = skip),
 `--redis-port` (default 0 = skip), `--ensure-api-server` (or `PENTESTSWARM_ENSURE_API_SERVER=1`),
 `--log-dir`, `--wait` (90 s), `--check-only` (summary JSON on stderr with `api_server`, `ollama`,
