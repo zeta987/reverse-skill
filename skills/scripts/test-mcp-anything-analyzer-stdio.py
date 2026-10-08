@@ -120,6 +120,55 @@ stub_pnpm = stub_dir / 'pnpm.cmd'
 stub_pnpm.write_text('@echo off\r\necho invoked %* >> "%REVERSE_TEST_MARKER%"\r\nif not "%1"=="dev" exit /b 9\r\n'
                      f'"{sys.executable}" -I "{fixture}"\r\n', encoding='ascii')
 
+# mcp-remote stand-in for the ownership tests: spawns a grandchild the way npx-cli.js -> cmd ->
+# node does, records both pids, then holds stdin open like a proxy would.
+STANDIN = r'''
+import json, os, signal, subprocess, sys, time
+signal.signal(signal.SIGBREAK, signal.SIG_IGN)  # survive the console event aimed at the launcher's group
+record = os.environ['REVERSE_TEST_STANDIN_RECORD']
+grandchild = subprocess.Popen([sys.executable, '-I', '-c', 'import time; time.sleep(600)'],
+                              creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,  # own group: only the job can end it
+                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+with open(record, 'w', encoding='utf-8') as handle:
+    json.dump({'pid': os.getpid(), 'grandchild': grandchild.pid, 'argv': sys.argv[1:]}, handle)
+sys.stdout.write(json.dumps({'jsonrpc': '2.0', 'id': 0, 'result': {'standin': True}}) + '\n'); sys.stdout.flush()
+for _ in sys.stdin:
+    pass
+time.sleep(600)  # a proxy that ignores EOF: only explicit termination or the job object ends it
+'''
+standin = root / 'standin.py'
+standin.write_text(STANDIN, encoding='utf-8')
+
+
+def pid_alive(pid):
+    import ctypes
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    handle = kernel32.OpenProcess(0x1000, False, int(pid))  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return False
+    try:
+        code = ctypes.c_ulong()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return False
+        return code.value == 259  # STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def wait_dead(pids, timeout=10):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not any(pid_alive(pid) for pid in pids):
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def kill_tree_best_effort(pids):
+    for pid in pids:
+        subprocess.run(['taskkill', '/PID', str(pid), '/T', '/F'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 base_env = {**os.environ, 'REVERSE_TEST_TOKEN': test_token, 'REVERSE_TEST_NONCE': nonce,
             'REVERSE_TEST_MARKER': str(marker), 'REVERSE_TEST_SERVER_NAME': 'anything-analyzer',
             'REVERSE_TEST_EARLY_EXIT': '0', 'ANYTHING_ANALYZER_MCP_TOKEN': test_token}
@@ -358,7 +407,60 @@ try:
     assert_refused(early, 'exited with code', 'early exit')
     assert marker_count() == 3
 
-    # --- 7. optional: pinned mcp-remote proxy leg against the fake server ---
+    # --- 7. proxy subtree ownership: the launcher's death (hard kill or normal exit) takes the
+    #        proxy and its grandchild with it; the detached app fixture survives both ---
+    standin_env = {'ANYTHING_ANALYZER_MCP_REMOTE_COMMAND': json.dumps([sys.executable, '-I', str(standin)])}
+    standin_pids = []
+    ownership = {}
+    for mode in ('hard-kill', 'ctrl-break'):
+        record_path = root / f'standin-{mode}.json'
+        env = {**base_env, 'REVERSE_TEST_PORT': str(port), **standin_env, 'REVERSE_TEST_STANDIN_RECORD': str(record_path)}
+        out_path, err_path = root / f'standin-{mode}.stdout', root / f'standin-{mode}.stderr'
+        with out_path.open('wb') as out, err_path.open('wb') as err:
+            process = subprocess.Popen(launcher_command(port, config, start_log, 'mcp-remote'), env=env,
+                                       stdin=subprocess.PIPE, stdout=out, stderr=err,
+                                       creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline and not record_path.exists() and process.poll() is None:
+                time.sleep(0.2)
+            assert record_path.exists(), f'{mode}: stand-in never started: {err_path.read_text(errors="replace")}'
+            time.sleep(0.3)
+            pids = json.loads(record_path.read_text(encoding='utf-8'))
+            standin_pids += [pids['pid'], pids['grandchild']]
+            assert pid_alive(pids['pid']) and pid_alive(pids['grandchild']), f'{mode}: stand-in chain not alive before the test'
+            assert 'owned by a kill-on-close job object' in err_path.read_text(errors='replace'), f'{mode}: job object was not applied: {err_path.read_text(errors="replace")}'
+            assert pids['argv'][:2] == ['-y', 'mcp-remote@0.14.3'], f'{mode}: stand-in did not receive the mcp-remote argv: {pids["argv"]}'
+            if mode == 'hard-kill':
+                process.kill()  # TerminateProcess: what a client does on timeout; no handler can run
+                process.wait(timeout=10)
+                ownership[mode] = {'launcher_exit': process.returncode}
+            else:
+                # Catchable termination: CTRL_BREAK to the launcher's own group. The stand-in ignores the
+                # event and the grandchild sits in another group, so only the launcher's explicit
+                # terminate + job teardown can end them.
+                import signal
+                try:
+                    process.send_signal(signal.CTRL_BREAK_EVENT)
+                except OSError as error:
+                    process.kill()
+                    process.wait(timeout=10)
+                    ownership[mode] = f'SKIPPED (no console for CTRL_BREAK_EVENT: {error})'
+                    assert wait_dead([pids['pid'], pids['grandchild']], timeout=10), f'{mode}: subtree survived the fallback kill'
+                    continue
+                try:
+                    process.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=10)
+                    raise AssertionError(f'{mode}: launcher ignored CTRL_BREAK_EVENT for 15 s: {err_path.read_text(errors="replace")}')
+                stderr_text = err_path.read_text(errors='replace')
+                assert process.returncode == 130 and 'terminating the proxy subtree' in stderr_text, f'{mode}: launcher did not take the signal path (exit {process.returncode}): {stderr_text}'
+                ownership[mode] = {'launcher_exit': process.returncode}
+        assert wait_dead([pids['pid'], pids['grandchild']], timeout=10), f'{mode}: proxy subtree survived the launcher: stand-in alive={pid_alive(pids["pid"])} grandchild alive={pid_alive(pids["grandchild"])}'
+        assert http_get(port, '/owner')['pid'] == owner['pid'], f'{mode}: the detached app fixture was killed with the proxy subtree'
+    report['proxy_ownership'] = {**ownership, 'orphans': 0}
+
+    # --- 8. optional: pinned mcp-remote proxy leg against the fake server ---
     if os.environ.get('REVERSE_TEST_MCP_REMOTE') == '1':
         assert shutil.which('node'), 'node is required for the mcp-remote leg'
         remote = run_launcher(port, config, start_log, proxy='mcp-remote', stdin_frames=SMOKE, timeout=180, expect_frames=3)
@@ -372,6 +474,7 @@ try:
     report['status'] = 'PASS'
     report['fixture_only'] = True
 finally:
+    kill_tree_best_effort([pid for pid in standin_pids if pid_alive(pid)]) if 'standin_pids' in globals() else None
     for fixture_port in fixture_ports:
         try:
             if http_get(fixture_port, '/owner', timeout=2).get('fixture') == nonce:

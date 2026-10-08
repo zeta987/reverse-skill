@@ -219,6 +219,17 @@ not imported), so the tested bridge interpreter `D:\WIN_MCP\reverse-mcp-python\S
      per stdin frame, SSE/JSON answer written as one line, `mcp-session-id` learned from
      `initialize`, notifications/responses expect 202 and emit nothing, no standalone GET
      stream. No Node or network needed; use it when npx is unavailable.
+   Proxy subtree ownership: right before spawning the proxy (after any `pnpm dev` is already
+   running outside it) the launcher assigns **itself** to a Job Object with
+   `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so `node npx-cli.js → cmd → node proxy.js` are
+   members from their first instruction and die with the launcher even on `TerminateProcess`
+   (a client's timeout kill); assigning the child after `Popen` would miss the grandchildren a
+   venv redirector or `npx.cmd` spawns in the first microseconds. Catchable stops
+   (`SIGBREAK`/`SIGINT`/`SIGTERM`) terminate the proxy child explicitly and exit 130; process
+   exit closes the job handle, which ends the rest. If nested-job assignment is refused, the
+   child is assigned after spawn as a best effort and the log line says so.
+   `ANYTHING_ANALYZER_MCP_REMOTE_COMMAND` (JSON argv array) replaces `node npx-cli.js` for
+   tests and local overrides.
    Both legs passed the three-message smoke (`initialize`, `server/discover` → `-32601`,
    `tools/list`) against the fake Streamable HTTP server in
    `skills/scripts/test-mcp-anything-analyzer-stdio.py`, which mirrors the SDK 1.29 transport

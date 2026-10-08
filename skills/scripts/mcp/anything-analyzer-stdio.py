@@ -332,9 +332,125 @@ def ensure_backend(args, candidates):
 
 # --- proxy legs ----------------------------------------------------------------------
 
+class ProxyJob:
+    """Own the proxy subtree: a Windows Job Object with KILL_ON_JOB_CLOSE whose only handle lives
+    in this launcher, so node -> cmd -> mcp-remote die together with it even on TerminateProcess
+    (a client's timeout kill).
+
+    The launcher assigns *itself* to the job right before it spawns the proxy, after the
+    detached `pnpm dev` app already exists: every later descendant is a job member from its
+    first instruction, so nothing can escape in the gap between CreateProcess and
+    AssignProcessToJobObject (a venv python.exe redirector or npx.cmd spawns its real child in
+    microseconds, which an assign-after-spawn would miss). The app, spawned earlier, is never a
+    member. When nested-job assignment of the launcher is refused (pre-Windows 8 parent job
+    without breakaway), the proxy child is assigned after spawn as a best effort."""
+
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+    JobObjectExtendedLimitInformation = 9
+
+    def __init__(self):
+        self.handle = None
+        self.kernel32 = None
+        self.self_member = False
+
+    def adopt(self, process=None):
+        """process=None assigns the launcher itself; otherwise the given Popen child."""
+        if os.name != 'nt':
+            return False
+        import ctypes
+        import ctypes.wintypes as wintypes
+
+        class IoCounters(ctypes.Structure):
+            _fields_ = [(name, ctypes.c_ulonglong) for name in
+                        ('ReadOperationCount', 'WriteOperationCount', 'OtherOperationCount',
+                         'ReadTransferCount', 'WriteTransferCount', 'OtherTransferCount')]
+
+        class BasicLimit(ctypes.Structure):
+            _fields_ = [('PerProcessUserTimeLimit', ctypes.c_longlong), ('PerJobUserTimeLimit', ctypes.c_longlong),
+                        ('LimitFlags', wintypes.DWORD), ('MinimumWorkingSetSize', ctypes.c_size_t),
+                        ('MaximumWorkingSetSize', ctypes.c_size_t), ('ActiveProcessLimit', wintypes.DWORD),
+                        ('Affinity', ctypes.c_size_t), ('PriorityClass', wintypes.DWORD), ('SchedulingClass', wintypes.DWORD)]
+
+        class ExtendedLimit(ctypes.Structure):
+            _fields_ = [('BasicLimitInformation', BasicLimit), ('IoInfo', IoCounters),
+                        ('ProcessMemoryLimit', ctypes.c_size_t), ('JobMemoryLimit', ctypes.c_size_t),
+                        ('PeakProcessMemoryUsed', ctypes.c_size_t), ('PeakJobMemoryUsed', ctypes.c_size_t)]
+
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+        kernel32.CreateJobObjectW.argtypes = (wintypes.LPVOID, wintypes.LPCWSTR)
+        kernel32.SetInformationJobObject.restype = wintypes.BOOL
+        kernel32.SetInformationJobObject.argtypes = (wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD)
+        kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+        kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+        kernel32.TerminateJobObject.restype = wintypes.BOOL
+        kernel32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
+        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        job = kernel32.CreateJobObjectW(None, None)
+        if not job:
+            log(f'CreateJobObjectW failed ({ctypes.get_last_error()}); proxy subtree is not owned')
+            return False
+        info = ExtendedLimit()
+        info.BasicLimitInformation.LimitFlags = self.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not kernel32.SetInformationJobObject(job, self.JobObjectExtendedLimitInformation, ctypes.byref(info), ctypes.sizeof(info)):
+            log(f'SetInformationJobObject failed ({ctypes.get_last_error()}); proxy subtree is not owned')
+            kernel32.CloseHandle(job)
+            return False
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        target = kernel32.GetCurrentProcess() if process is None else wintypes.HANDLE(int(process._handle))
+        if not kernel32.AssignProcessToJobObject(job, target):
+            # Typically a parent job without BREAKAWAY/nesting (pre-Windows 8); the chain then
+            # follows that parent job's rules instead.
+            log(f'AssignProcessToJobObject({"self" if process is None else process.pid}) failed ({ctypes.get_last_error()}); proxy subtree is not owned')
+            kernel32.CloseHandle(job)
+            return False
+        self.kernel32 = kernel32
+        self.handle = job
+        self.self_member = process is None
+        return True
+
+    def terminate_children(self):
+        """Kill every member except the launcher. With self-membership TerminateJobObject would
+        kill this process too, so the kill-on-close at process exit does that part instead."""
+        if self.handle and self.kernel32 and not self.self_member:
+            self.kernel32.TerminateJobObject(self.handle, 1)
+
+    def close(self):
+        if self.handle and self.kernel32 and not self.self_member:
+            self.kernel32.CloseHandle(self.handle)  # KILL_ON_JOB_CLOSE finishes whatever is left
+            self.handle = None
+
+
+def install_termination_signals():
+    """Turn the catchable termination signals into KeyboardInterrupt so the proxy child is
+    terminated explicitly. TerminateProcess is not catchable; the job object covers that."""
+    import signal
+
+    def raise_interrupt(signum, frame):
+        raise KeyboardInterrupt
+
+    for name in ('SIGTERM', 'SIGBREAK', 'SIGINT'):
+        number = getattr(signal, name, None)
+        if number is not None:
+            try:
+                signal.signal(number, raise_interrupt)
+            except (ValueError, OSError):
+                pass
+
+
 def npx_command():
     """node.exe + npx-cli.js directly: a quoted npx.cmd path plus a quoted --header value
     would trip cmd.exe's first/last-quote stripping rule."""
+    override = os.environ.get('ANYTHING_ANALYZER_MCP_REMOTE_COMMAND', '')
+    if override:
+        # Test hook / local override: JSON argv prefix that stands in for `node npx-cli.js`.
+        try:
+            command = json.loads(override)
+        except ValueError:
+            raise LauncherError('ANYTHING_ANALYZER_MCP_REMOTE_COMMAND must be a JSON array of strings') from None
+        if not isinstance(command, list) or not command or not all(isinstance(item, str) for item in command):
+            raise LauncherError('ANYTHING_ANALYZER_MCP_REMOTE_COMMAND must be a JSON array of strings')
+        return command
     node = shutil.which('node')
     if not node:
         raise LauncherError('node was not found on PATH; mcp-remote needs Node.js (or use --proxy relay).')
@@ -363,12 +479,32 @@ def run_mcp_remote(args, token, mcp_fd):
     env = dict(os.environ)
     env[TOKEN_ENV] = token  # mcp-remote expands ${VAR} itself; the value never reaches the command line
     log(f'proxy: mcp-remote@{args.mcp_remote_version} -> http://127.0.0.1:{args.port}/mcp')
+    job = ProxyJob()
+    owned = job.adopt()  # the launcher joins first; pnpm dev (if any) was spawned before this point
     child = subprocess.Popen(command, stdin=sys.stdin.fileno(), stdout=mcp_fd, stderr=sys.stderr.fileno(), env=env)
+    if not owned:
+        owned = job.adopt(child)
+    if owned:
+        log(f'proxy subtree (pid {child.pid}) owned by a kill-on-close job object ({"launcher is a member" if job.self_member else "child assigned after spawn"})')
     try:
-        return child.wait()
-    except KeyboardInterrupt:
+        while True:
+            # A timed wait returns to the interpreter periodically; an infinite
+            # WaitForSingleObject would never let the SIGBREAK/SIGINT handler run on Windows.
+            try:
+                return child.wait(timeout=0.5)
+            except subprocess.TimeoutExpired:
+                continue
+    except (KeyboardInterrupt, SystemExit):
+        log('terminating the proxy subtree')
         child.terminate()
-        return 130
+        job.terminate_children()
+        try:
+            child.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        return 130  # process exit closes the job handle; KILL_ON_JOB_CLOSE ends the grandchildren
+    finally:
+        job.close()
 
 
 def run_relay(args, token, mcp_fd):
@@ -435,6 +571,7 @@ def parse_args(argv):
 
 def main(argv=None):
     mcp_fd = park_stdout()
+    install_termination_signals()
     args = parse_args(argv)
     try:
         candidates = token_candidates()
