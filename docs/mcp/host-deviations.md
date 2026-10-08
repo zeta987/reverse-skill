@@ -18,7 +18,7 @@ Go 1.27, Gradle 9.3, JDK 21, VS Community 2026).
 | seclists | git-clone at pinned commit | `git fetch --depth 1 <pinned>` with `-c core.autocrlf=false`; 11 payload files (EICAR, zip bombs, web shells) were removed by Defender and must not be restored | System-level `core.autocrlf=true` made the fresh checkout look dirty, so bootstrap refused it |
 | proxycat | git-clone + manual pip | Dependencies in `%USERPROFILE%\Tools\ProxyCat\.venv` (uv, Python 3.13); launcher `%USERPROFILE%\Tools\bin\proxycat.bat` | `postInstallSteps` are never executed by any script |
 | anything-analyzer | local-http-mcp, auto | **Not installed.** | `Test-VsBuildToolsInstalled` only checks the VS 2022 BuildTools folders and would winget-install them although VS 2026 with VC tools is present |
-| pentestswarm | go-install + MCP | Installed, **not registered** in any client | `pentestswarm doctor` requires its API server (8080), Redis, Docker and Ollama first |
+| pentestswarm | go-install + MCP, "needs Claude/Ollama API key" | Installed; registered as the stdio launcher `pentestswarm-stdio.py` (see the runbook below); provider `ollama`, no key | The manifest note was wrong: the `ollama` provider needs no key. v0.1.0's `mcp serve` runs the swarm engine in-process and never opens Postgres or Redis; `doctor` only dials the ports |
 | idapro (HTTP) | register `http://127.0.0.1:13337/mcp` | Not registered; the stdio proxy `ida-pro-mcp` already targets the same backend | Double registration of one backend is what `docs/mcp/codex.md` warns against |
 
 Status after the 2026-10-08 fork fixes (branch `dev/windows-mcp-clients`):
@@ -34,6 +34,7 @@ Status after the 2026-10-08 fork fixes (branch `dev/windows-mcp-clients`):
 | idapro (HTTP) | unchanged: still a second alias of the stdio-proxied backend |
 | burpsuite-mcp | manifest now registers the stdio bridge `node <repo>\burp-mcp-full\mcp-bridge.js` instead of `http://localhost:9876/mcp` |
 | ghidra-mcp | manifest describes the GhydraMCP path (user extension, loopback patch, `ghydra-stdio.py`, REST from 8192) instead of LaurieWired 8765 |
+| pentestswarm | manifest `mcpBridgeLauncher: %SKILL_ROOT%\scripts\mcp\pentestswarm-stdio.py`, `servicePort: 8080`, note rewritten for the free local stack (provider `ollama`, no API key); `start-local-backend.ps1 -Backend PentestSwarm`; runbook and client shapes below. Bootstrap does not write the entry (the parent registers by hand) |
 
 Registration scope: `bootstrap-reverse.ps1 -McpHostTarget Claude|Codex|Antigravity|Both|All`
 now writes the project-scope files listed below (`-McpScope Project`, default). Claude Code
@@ -47,10 +48,10 @@ this machine's absolute paths.
 
 | Client | File | Servers |
 |---|---|---|
-| Codex CLI | `.codex/config.toml` (project scope, repo is trusted) | ida-pro-mcp, Ghidra-mcp, x64dbg-mcp, math-mcp, r2mcp, jshook, xquik, anything-analyzer (stdio launcher, see below) |
-| Claude Code | `.mcp.json` + `.claude/settings.local.json` (`enabledMcpjsonServers`) | same eight; every stdio entry carries `"type": "stdio"` |
-| Antigravity | `.agents/mcp_config.json` (`mcpServers`, no `cwd` field) | same eight; `xquik` as `serverUrl` |
-| dsh web | `.dsh/agent-presets/reverse-skill/agent.cordis.yml` | ida-pro, ghidra, x64dbg, math, r2, jshook, anything-analyzer (xquik not added: http transport unverified) |
+| Codex CLI | `.codex/config.toml` (project scope, repo is trusted) | ida-pro-mcp, Ghidra-mcp, x64dbg-mcp, math-mcp, r2mcp, jshook, xquik, anything-analyzer (stdio launcher, see below), pentestswarm (stdio launcher, see below) |
+| Claude Code | `.mcp.json` + `.claude/settings.local.json` (`enabledMcpjsonServers`) | same nine; every stdio entry carries `"type": "stdio"` |
+| Antigravity | `.agents/mcp_config.json` (`mcpServers`, no `cwd` field) | same nine; `xquik` as `serverUrl` |
+| dsh web | `.dsh/agent-presets/reverse-skill/agent.cordis.yml` | ida-pro, ghidra, x64dbg, math, r2, jshook, anything-analyzer, pentestswarm (xquik not added: http transport unverified) |
 
 `r2mcp` and `jshook` answer `server/discover` with `-32601` natively, so they do not
 need the `legacy-mcp-stdio.py` wrapper that the Python `mcp==1.6.0` bridges need.
@@ -314,6 +315,163 @@ registration `{"type":"http","url":"http://127.0.0.1:23816/mcp","headers":{"Auth
 and a client whose process environment predates the current token gets 401 until restarted;
 that is exactly what happened on 2026-10-08 (process value ≠ User value while both config
 copies matched the User value).
+
+### Pentest Swarm AI (pentestswarm v0.1.0, free local stack)
+
+`%USERPROFILE%\go\bin\pentestswarm.exe` reports `version dev` (the `go install …@v0.1.0`
+build has no ldflags); the module cache holds the matching source under
+`%USERPROFILE%\go\pkg\mod\github.com\!armur-!ai\!pentest-!swarm-!a!i@v0.1.0`, which is what
+every statement below was read from. Three upstream facts override the manifest's old
+"needs Claude/Ollama API key" note and the `doctor` wording:
+
+1. **`mcp serve` is self-contained.** `cli/mcp.go` → `mcp.RegisterDefaultTools(server, cfg)`
+   → `engine.NewRunner(cfg)` with `memory.NewMemoryStore()`; the five tools run the swarm
+   engine **in-process** over stdio. Nothing imports `internal/db` (the only
+   `pgxpool.NewWithConfig` is inside that package, `Migrate` has no caller) and `go.mod` has
+   no Redis client. `campaign_status` merely formats a `http://localhost:8080/...` URL. The
+   API server on 8080, Postgres and Redis are therefore only what `pentestswarm doctor`
+   (pure TCP dials) and the `campaign`/`scan --follow` CLI paths want; the launcher still
+   brings 8080 up because the brief and `doctor` expect it.
+2. **`serve` ignores `server.host`.** `internal/api/server.go` `Start()` is
+   `app.Listen(":<port>")`; the live process binds `0.0.0.0:8080` (netstat, 2026-10-08,
+   IPv4 wildcard only). `config.yaml` records `host: "127.0.0.1"` as the intent, both
+   launchers report `bind_all_interfaces: true` with a stderr warning, and the choice between
+   a fork patch (`Listen(host:port)` + `go build` from a copy of the module source, the same
+   pattern as `docs/mcp/patches/`), a Windows Firewall rule, or accepting the wildcard is
+   recorded here once the owner decides. Nothing in this fork patches the binary yet.
+3. **Protocol quirks** (verified live on 2026-10-08 with the four-frame smoke):
+   `protocolVersion` is hard-coded `2024-11-05`; `server/discover` and `ping` answer
+   `-32601` natively (no `legacy-mcp-stdio.py` wrapper for the dsh row); the `default` case
+   of `handleRequest` also answers **notifications**, so `notifications/initialized` produces
+   one id-less `{"jsonrpc":"2.0","error":{"code":-32601,...}}` frame on stdout; `tools/list`
+   iterates a Go map (compare sorted). Tool count: **5** (`campaign_status`,
+   `explain_finding`, `list_tools`, `quick_recon`, `scan_target`).
+
+Host components (all free; nothing paid, no provider key anywhere):
+
+| Component | State on this host | How it was reached |
+|---|---|---|
+| PostgreSQL | native service `postgresql-x64-18` (18.6, EDB installer), `listen_addresses = '*'` and loopback `trust` in `pg_hba.conf` (pre-existing host config, not changed) | role + database `pentestswarm` created on 2026-10-08 with a 32-char generated password that exists only in the User environment variable `PENTESTSWARM_DATABASE_PASSWORD` (`psql -v pw=… -f -`, never on a command line). **pgvector is not available**: no `vector.control` under `C:\Program Files\PostgreSQL\18\share\extension`, no Windows binary for PG 18 without a source build, and v0.1.0 never runs `000002_pgvector.sql`. The Docker `pgvector/pgvector:pg16` fallback was not used because it would publish 5432, which the native service already owns |
+| Redis | `winget install Memurai.MemuraiDeveloper` (4.1.2, free developer edition, Windows service `Memurai`) — see the status line below | `doctor` dials 6379 only; both launchers treat a closed 6379 as a **warning** (they try `Start-Service`/`sc start Memurai` first) because v0.1.0 never opens Redis |
+| Ollama | `%LOCALAPPDATA%\Programs\Ollama\ollama.exe` 0.11.8 (not a service, no autostart) | launchers run `ollama serve` detached with `OLLAMA_HOST=127.0.0.1:11434`; model `llama3.1:8b` (the `pentestswarm config init` default; `internal/llm/ollama.go` names "Llama 3.1+" for tool calling; 4.92 GB from `registry.ollama.ai`) — see the status line below |
+| Docker | Desktop 29.8.2 running (autostart) | not needed by this stack; only the bundled labs use it |
+| config | `%USERPROFILE%\.pentestswarm\config.yaml` (viper's second search path after `./config.yaml`; both launchers pass `--config` explicitly because `HOME` is empty on Windows and Codex strips `USERPROFILE`) | `server.host 127.0.0.1`, `server.port 8080`, `orchestrator.provider ollama`, `model llama3.1:8b`, `endpoint http://127.0.0.1:11434`, `api_key ""`, `context_window 32768`, `database.*` as above with `password ""`, `redis 127.0.0.1:6379`, `intelligence.enabled false` |
+
+Status line (updated as the host steps land): Postgres role/db ✅, `config.yaml` ✅,
+`pentestswarm serve` ✅ (started by `pentestswarm-stdio.py --check-only` on 2026-10-08,
+pid in `%LOCALAPPDATA%\reverse-skill\pentestswarm\PentestSwarm-<stamp>.process.json`,
+`GET /api/v1/health` → `{"service":"pentestswarm","status":"ok"}`), Memurai ⏳ (install
+awaiting the owner's approval), `ollama pull llama3.1:8b` ⏳ (4.92 GB, awaiting approval),
+`doctor` 8/8 ⏳, live `tools/list` through the launcher ⏳.
+
+#### Agent-controlled start (same contract as the other backends)
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File skills\scripts\mcp\start-local-backend.ps1 `
+  -Backend PentestSwarm -LogDir "$env:LOCALAPPDATA\reverse-skill\pentestswarm" -WaitSeconds 90
+```
+
+Defaults: `-Executable` = `pentestswarm` on PATH, else `%USERPROFILE%\go\bin\pentestswarm.exe`;
+`-ConfigPath %USERPROFILE%\.pentestswarm\config.yaml`; `-Port 8080`; `-OllamaPath` = `ollama`
+on PATH, else `%LOCALAPPDATA%\Programs\Ollama\ollama.exe`; `-OllamaPort 11434`; `-RedisPort 6379`
+(`0` skips either dependency). Order: read-only `config.yaml` validation (`server.host`
+`127.0.0.1`, `server.port` == `-Port`, `provider ollama`, empty `api_key`, non-empty `model`,
+loopback `endpoint` on `-OllamaPort`; each failure has its own message and nothing is started)
+→ Redis (service start attempt, then warning) → Ollama (`GET /api/tags`; reuse, else
+`ollama serve` detached + `Ollama-<stamp>.*` logs/record; a missing model is a warning naming
+`ollama pull <model>`) → API server (`GET /api/v1/health` must answer `service pentestswarm`;
+reuse, else `pentestswarm serve --config <path> --port <port>` hidden with
+`PentestSwarm-<stamp>.{stdout,stderr}.log` + `.process.json`). The JSON on stdout carries
+`dependencies.redis`, `dependencies.ollama` (`state`, `models`, `model_present`) and
+`bind_all_interfaces`; every advisory line goes to **stderr** so stdout stays parseable. The
+named mutex `Local\reverse-skill-PentestSwarm-8080` is shared with the stdio launcher. Provider
+and API-key variables (`ANTHROPIC_API_KEY`, `PENTESTSWARM_ORCHESTRATOR_*`,
+`PENTESTSWARM_AGENTS_*`) are removed from every child environment; `PENTESTSWARM_DATABASE_PASSWORD`
+(process, else User scope) is handed to `serve` only. An occupied 8080 whose health answers
+another service, or an occupied 11434 without `/api/tags`, is refused with that reason and
+left running. Fixture test: `skills/scripts/test-mcp-pentestswarm-start.ps1` (stub
+`pentestswarm.cmd`/`ollama.cmd` + Python HTTP fixtures, random ports; passes under Windows
+PowerShell 5.1 and pwsh 7).
+
+#### Auto-start from the MCP clients (stdio launcher)
+
+Every client registers [`pentestswarm-stdio.py`](../../skills/scripts/mcp/pentestswarm-stdio.py)
+(standard-library Python, run by the tested bridge interpreter) as a **stdio** server. It does
+the same validation and dependency chain as the PowerShell entrypoint, then `exec`s
+`pentestswarm mcp serve --config <path>` with stdin/stdout inherited (fd 1 is parked on stderr
+until that moment, so no diagnostic can reach the MCP channel) and its cwd set to
+`%LOCALAPPDATA%\reverse-skill\pentestswarm\work` (the swarm tools write `./reports` there, never
+into a repo). The MCP child is owned the same way as the Anything Analyzer proxy: the launcher
+assigns **itself** to a `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` job right before the spawn (after
+`ollama serve`/`pentestswarm serve` were started detached outside it), so a client's
+`TerminateProcess` on timeout ends the child and its grandchildren; `SIGBREAK`/`SIGINT`/`SIGTERM`
+terminate it explicitly (exit 130).
+
+It needs **nothing from the process environment**: Codex hands MCP servers a filtered
+environment, so `USERPROFILE` comes from `HKCU\Volatile Environment`, `APPDATA`/`LOCALAPPDATA`
+from `HKCU\...\Explorer\Shell Folders`, `SHGetKnownFolderPath` is the next fallback, and PATH is
+the union of the process PATH, `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment\Path`
+and `HKCU\Environment\Path` (`%VAR%` expanded). The resolved values are injected into the
+children (`USERPROFILE`, `HOMEDRIVE`/`HOMEPATH`, `APPDATA`, `LOCALAPPDATA`, `PATH`) because
+`os.UserHomeDir()` is used by the fp cache, NVD cache and `init`. Overrides: `--exe`/`PENTESTSWARM_EXE`,
+`--config`/`PENTESTSWARM_CONFIG`, `--port`, `--ollama-exe`, `--ollama-port` (0 = skip),
+`--redis-port` (0 = skip), `--log-dir`, `--wait` (90 s), `--check-only` (summary JSON on stderr,
+no MCP child). Fixture test: `skills/scripts/test-mcp-pentestswarm-stdio.py` (stub launchers,
+HTTP + stdio fixtures mirroring the quirks above; 10 validation refusals with empty stdout,
+fresh start, reuse, missing-model warning, 3-way concurrency → one `ollama serve` + one
+`pentestswarm serve`, wrong owner on either port, early exit, hard-kill + ctrl-break ownership
+under a Codex-style environment with `USERPROFILE`/`APPDATA`/`LOCALAPPDATA`/`PATH` removed,
+`--check-only`). Client startup timeouts apply as for Anything Analyzer: `ollama serve` cold
+start plus `pentestswarm serve` are both fast on this host (the API server answered health
+within a second of the spawn), but set the Codex timeout explicitly anyway.
+
+Shapes to paste (repo = `D:\Data\Coding_Github\Reverse\reverse-skill`, all four files
+gitignored; no url, no key, no password anywhere):
+
+```json
+// .mcp.json (Claude Code) — add "pentestswarm" to .claude/settings.local.json enabledMcpjsonServers
+"pentestswarm": {
+  "type": "stdio",
+  "command": "D:\\WIN_MCP\\reverse-mcp-python\\Scripts\\python.exe",
+  "args": ["D:\\Data\\Coding_Github\\Reverse\\reverse-skill\\skills\\scripts\\mcp\\pentestswarm-stdio.py"]
+}
+```
+
+```toml
+# .codex/config.toml (Codex). No env_vars needed: the launcher resolves every path from the
+# registry and never needs a token; startup_timeout_sec covers a cold `ollama serve`.
+[mcp_servers.pentestswarm]
+command = "D:\\WIN_MCP\\reverse-mcp-python\\Scripts\\python.exe"
+args = ["D:\\Data\\Coding_Github\\Reverse\\reverse-skill\\skills\\scripts\\mcp\\pentestswarm-stdio.py"]
+startup_timeout_sec = 120
+```
+
+```json
+// .agents/mcp_config.json (Antigravity) — no cwd, no type, no env
+"pentestswarm": {
+  "command": "D:\\WIN_MCP\\reverse-mcp-python\\Scripts\\python.exe",
+  "args": ["D:\\Data\\Coding_Github\\Reverse\\reverse-skill\\skills\\scripts\\mcp\\pentestswarm-stdio.py"]
+}
+```
+
+```yaml
+# .dsh/agent-presets/reverse-skill/agent.cordis.yml (dsh web) — append after the Standard composition;
+# server/discover is answered -32601 natively, so no legacy-mcp-stdio.py wrapper
+- id: mcp-pentestswarm
+  name: '@deepseek-ai/dsh-mcp-client'
+  config:
+    serverName: pentestswarm
+    transport: stdio
+    command: 'D:\WIN_MCP\reverse-mcp-python\Scripts\python.exe'
+    args: ['D:\Data\Coding_Github\Reverse\reverse-skill\skills\scripts\mcp\pentestswarm-stdio.py']
+    cwd: 'D:\Data\Coding_Github\Reverse\reverse-skill\skills\scripts\mcp'
+```
+
+Manual `doctor`/`serve` from a shell: `pentestswarm doctor` and `pentestswarm serve` find the
+config through `$HOME/.pentestswarm` only when viper can resolve a home directory; pass
+`--config "$env:USERPROFILE\.pentestswarm\config.yaml"` when in doubt. Authorized targets only:
+the `scan_target`/`quick_recon` tools run real recon tooling against whatever target the client
+names.
 
 ### x64dbg
 

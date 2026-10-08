@@ -52,14 +52,15 @@ is not automatically a Streamable HTTP MCP endpoint.
 | GhydraMCP | Open an enabled CodeBrowser tool and a project/program, then verify instance discovery | The Python bridge and its local discovery loop |
 | x64dbg | Launch the debugger with the installed matching `.dp64`/`.dp32` plugin; an empty debugger is sufficient for a health check | The Python bridge only |
 | Anything Analyzer | Registered as the stdio launcher `anything-analyzer-stdio.py`: the client spawns it, it validates `mcp-server-config.json`, runs `pnpm dev` detached in the pinned checkout, waits for an authenticated `initialize` on `127.0.0.1:23816/mcp` and then proxies stdio to it (pinned `mcp-remote`, or its built-in relay). `start-local-backend.ps1 -Backend AnythingAnalyzer` is the same start without a proxy | With the stdio shape: the app itself, on demand. With the manual HTTP+Bearer shape: nothing, the client reports connection refused until the app runs |
+| Pentest Swarm AI | Registered as the stdio launcher `pentestswarm-stdio.py`: the client spawns it, it validates `%USERPROFILE%\.pentestswarm\config.yaml` (provider `ollama`, no key), brings up Redis/Memurai (warning only), `ollama serve` on `127.0.0.1:11434` and `pentestswarm serve` (health `GET 127.0.0.1:8080/api/v1/health`), then runs `pentestswarm mcp serve` on the same stdio. `start-local-backend.ps1 -Backend PentestSwarm` is the same chain without the MCP child | With the stdio shape: the whole local stack, on demand. A bare `pentestswarm mcp serve` entry starts the engine without Ollama and fails at the first tool call |
 | math | No separate GUI/backend | The complete MCP server |
 
 The agent should perform startup and verification when authorized, rather than
 ask the user to copy tutorial commands. GUI applications or licenses that
 actually require a human decision are reported with their precise blocker.
 
-For the currently supported IDA headless, x64dbg and Anything Analyzer
-entrypoints, use
+For the currently supported IDA headless, x64dbg, Anything Analyzer and
+Pentest Swarm AI entrypoints, use
 [`start-local-backend.ps1`](../../skills/scripts/mcp/start-local-backend.ps1).
 It accepts resolved executable paths, probes the real API, reuses a healthy
 backend, records a newly started PID, and starts without a target. It never
@@ -80,7 +81,15 @@ the registered entry is the stdio launcher
 then a `mcp-remote` or built-in relay proxy leg), so a client start brings the
 app up without a manual step. The runbook, the four client shapes, the host
 evidence and the known upstream limitation are in
-[host-deviations.md](host-deviations.md).
+[host-deviations.md](host-deviations.md). `-Backend PentestSwarm` and
+[`pentestswarm-stdio.py`](../../skills/scripts/mcp/pentestswarm-stdio.py) follow the
+same contract for Pentest Swarm AI on the free local stack (Ollama, Memurai, native
+PostgreSQL): read-only `config.yaml` validation, reuse of every healthy listener, detached
+`ollama serve` / `pentestswarm serve`, a kill-on-close job object around the
+`pentestswarm mcp serve` child, and path resolution from the registry when the client
+strips `APPDATA`/`LOCALAPPDATA`/`PATH`; the pentestswarm runbook in
+[host-deviations.md](host-deviations.md) records what v0.1.0 really needs (only Ollama
+at tool-call time) and that `serve` ignores `server.host`.
 
 For an existing authorized Ghidra project, use
 [`start-ghidra-project.ps1`](../../skills/scripts/mcp/start-ghidra-project.ps1)

@@ -236,6 +236,7 @@ Do NOT force the user to repeatedly confirm "this is CTF/local." Carry the CTF/l
 | BinDiff / Diaphora | `reverse-engineering/tools-advanced.md` |
 | anything-analyzer MCP | Port 23816 MCP server (browser + HTTP capture + AI analysis); the client entry is a bare URL, so ACTION REQUIRED: start the backend via `skills/scripts/mcp/start-local-backend.ps1 -Backend AnythingAnalyzer` before using anything-analyzer tools |
 | jshookmcp | `js-reverse/` enhancement MCP for browser/CDP/Hook/Network/SourceMap/AST |
+| pentestswarm MCP | `pentest-tools/SKILL.md` — Pentest Swarm AI (5 tools: scan_target, quick_recon, explain_finding, campaign_status, list_tools) on the free local stack; the client entry is the stdio launcher `skills/scripts/mcp/pentestswarm-stdio.py`, which brings up Ollama and `pentestswarm serve` itself. Manual check: `skills/scripts/mcp/start-local-backend.ps1 -Backend PentestSwarm`. Authorized targets only |
 | agent-browser / Playwright | `browser-automation/` — browser automation |
 | OpenReverse (UIA/CUA) | `browser-automation/` — Windows desktop automation |
 | Cheat Engine / x64dbg / ReClass | `reverse-engineering/` — game memory analysis (seed-014) |
