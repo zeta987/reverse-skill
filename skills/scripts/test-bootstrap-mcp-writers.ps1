@@ -36,7 +36,8 @@ $functionNames = @(
     'Read-ReverseMcpJsonConfig', 'Save-ReverseMcpJsonConfig', 'Get-ClaudeMcpConfig', 'Save-ClaudeMcpConfig',
     'ConvertTo-ClaudeMcpServerDefinition', 'Enable-ClaudeMcpJsonServer', 'Register-ClaudeUserMcpServer',
     'ConvertTo-AntigravityMcpServerDefinition', 'Set-AntigravityMcpServer',
-    'Ensure-McpServer', 'Get-McpCommandServerDefinition', 'Get-ManifestMcpServerDefinition'
+    'Ensure-McpServer', 'Get-McpCommandServerDefinition', 'Get-ManifestMcpServerDefinition',
+    'Get-AnythingAnalyzerUserDataPaths', 'Ensure-AnythingAnalyzerMcpConfig'
 )
 foreach ($name in $functionNames) {
     $functionAst = $ast.Find({
@@ -65,7 +66,7 @@ function Assert-True {
 }
 
 $oldEnv = @{}
-foreach ($key in @('CLAUDE_MCP_CONFIG', 'CLAUDE_SETTINGS_LOCAL', 'CODEX_CONFIG_PATH', 'ANTIGRAVITY_MCP_CONFIG', 'REVERSE_VSWHERE', 'PYTHONPATH', 'REVERSE_IDA_START_FUNCTIONS_ONLY')) {
+foreach ($key in @('CLAUDE_MCP_CONFIG', 'CLAUDE_SETTINGS_LOCAL', 'CODEX_CONFIG_PATH', 'ANTIGRAVITY_MCP_CONFIG', 'REVERSE_VSWHERE', 'PYTHONPATH', 'REVERSE_IDA_START_FUNCTIONS_ONLY', 'APPDATA')) {
     $oldEnv[$key] = [Environment]::GetEnvironmentVariable($key)
 }
 
@@ -213,6 +214,33 @@ try {
     $remote = [pscustomobject]@{ name = 'xquik-mcp'; mcpNames = @('xquik'); mcpUrl = 'https://xquik.com/mcp' }
     Assert-True ((Get-ManifestMcpServerDefinition -Definition $remote).url -eq 'https://xquik.com/mcp') 'manifest: mcpUrl yields a url definition'
     Assert-True ($null -eq (Get-ManifestMcpServerDefinition -Definition ([pscustomobject]@{ name = 'manual' }))) 'manifest: neither command nor url yields no registration'
+
+    # --- 4b. Anything Analyzer mcp-server-config.json: no BOM, loopback host, token reuse ---
+    $fakeAppData = Join-Path $ScratchDir 'appdata'
+    New-Item -ItemType Directory -Path $fakeAppData -Force | Out-Null
+    $env:APPDATA = $fakeAppData
+    $token = Ensure-AnythingAnalyzerMcpConfig -Port 23816
+    $configPath = Join-Path $fakeAppData 'anything-analyzer\mcp-server-config.json'
+    Assert-True (Test-Path -LiteralPath $configPath) 'anything-analyzer: mcp-server-config.json written'
+    $bytes = [IO.File]::ReadAllBytes($configPath)
+    Assert-True (-not ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)) 'anything-analyzer: config has no UTF-8 BOM (JSON.parse in the app would throw)'
+    $aaConfig = [Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json
+    Assert-True ($aaConfig.host -eq '127.0.0.1') 'anything-analyzer: host is explicitly 127.0.0.1 (app default is 0.0.0.0)'
+    Assert-True ($aaConfig.enabled -eq $true -and $aaConfig.authEnabled -eq $true -and $aaConfig.port -eq 23816) 'anything-analyzer: enabled, authEnabled and port written'
+    Assert-True ($aaConfig.authToken -eq $token -and -not [string]::IsNullOrWhiteSpace($token)) 'anything-analyzer: returned token matches the file'
+    Assert-True ((Test-Path -LiteralPath (Join-Path $fakeAppData 'Anything Analyzer\mcp-server-config.json'))) 'anything-analyzer: both user-data folder spellings receive the config'
+    # A pre-existing BOM-prefixed file (written by the old Set-Content path) must still have its token reused and be rewritten BOM-free.
+    $bomText = '{"enabled":false,"port":23816,"authEnabled":true,"authToken":"legacy-token"}'
+    [IO.File]::WriteAllText($configPath, $bomText, [Text.UTF8Encoding]::new($true))
+    (Get-Item -LiteralPath $configPath).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(5)
+    $reused = Ensure-AnythingAnalyzerMcpConfig -Port 23816
+    Assert-True ($reused -eq 'legacy-token') 'anything-analyzer: token of the most recently written config is reused'
+    $otherConfig = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes((Join-Path $fakeAppData 'Anything Analyzer\mcp-server-config.json'))) | ConvertFrom-Json
+    Assert-True ($otherConfig.authToken -eq 'legacy-token') 'anything-analyzer: both copies converge on the same token'
+    $bytes = [IO.File]::ReadAllBytes($configPath)
+    Assert-True (-not ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)) 'anything-analyzer: legacy BOM file is rewritten without BOM'
+    Assert-True (([Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json).enabled -eq $true) 'anything-analyzer: rewrite re-enables the server'
+    $env:APPDATA = $oldEnv['APPDATA']
 
     # --- 5. Zip extraction with a single top-level directory under StrictMode -----------
     $zipSource = Join-Path $ScratchDir 'zip-src\bkcrack-1.8.1-win64'

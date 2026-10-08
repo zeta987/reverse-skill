@@ -133,6 +133,25 @@ function Ensure-GitCloneInstall {
     return $true
 }
 
+function Get-AnythingAnalyzerSqliteBinary {
+    param([Parameter(Mandatory = $true)][string]$RepoDir)
+
+    # pnpm layout: node_modules\.pnpm\better-sqlite3@<version>\node_modules\better-sqlite3\build\Release\better_sqlite3.node
+    $pnpmStore = Join-Path $RepoDir 'node_modules\.pnpm'
+    $candidates = @()
+    if (Test-Path -LiteralPath $pnpmStore -PathType Container) {
+        $candidates += @(Get-ChildItem -LiteralPath $pnpmStore -Directory -Filter 'better-sqlite3@*' -ErrorAction SilentlyContinue |
+            ForEach-Object { Join-Path $_.FullName 'node_modules\better-sqlite3\build\Release\better_sqlite3.node' })
+    }
+    $candidates += (Join-Path $RepoDir 'node_modules\better-sqlite3\build\Release\better_sqlite3.node')
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return $candidate
+        }
+    }
+    return ''
+}
+
 function Invoke-AnythingAnalyzerPinnedInstall {
     param(
         [Parameter(Mandatory = $true)][string]$RepoDir,
@@ -159,10 +178,22 @@ function Invoke-AnythingAnalyzerPinnedInstall {
             if ($VsBuildToolsError) { throw "pnpm install failed for anything-analyzer. Visual Studio Build Tools auto-install also failed earlier: $VsBuildToolsError" }
             throw 'pnpm install failed for anything-analyzer.'
         }
-        & $PnpmPath rebuild electron esbuild better-sqlite3
+        # Do not `pnpm rebuild better-sqlite3`: that compiles for the Node ABI through pnpm's
+        # node-gyp 9 (which does not know VS 2026) and first wipes build/Release, destroying
+        # the Electron-ABI prebuilt that electron-builder install-app-deps provides.
+        & $PnpmPath rebuild electron esbuild
         if ($LASTEXITCODE -ne 0) {
             if ($VsBuildToolsError) { throw "pnpm rebuild failed for anything-analyzer. Visual Studio Build Tools auto-install also failed earlier: $VsBuildToolsError" }
             throw 'pnpm rebuild failed for anything-analyzer.'
+        }
+        & $PnpmPath exec electron-builder install-app-deps
+        if ($LASTEXITCODE -ne 0) {
+            if ($VsBuildToolsError) { throw "electron-builder install-app-deps failed for anything-analyzer. Visual Studio Build Tools auto-install also failed earlier: $VsBuildToolsError" }
+            throw 'electron-builder install-app-deps failed for anything-analyzer.'
+        }
+        $sqliteBinary = Get-AnythingAnalyzerSqliteBinary -RepoDir $RepoDir
+        if ([string]::IsNullOrWhiteSpace($sqliteBinary)) {
+            throw 'anything-analyzer better-sqlite3 Electron binary (build/Release/better_sqlite3.node) is missing after electron-builder install-app-deps.'
         }
         if (-not (Test-AnythingAnalyzerElectronHealthy -RepoDir $RepoDir -PnpmPath $PnpmPath)) {
             throw 'anything-analyzer Electron dependency is still unhealthy after pnpm rebuild.'

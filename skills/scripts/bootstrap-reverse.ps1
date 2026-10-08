@@ -201,14 +201,18 @@ function Get-AnythingAnalyzerUserDataPaths {
 function Ensure-AnythingAnalyzerMcpConfig {
     param([int]$Port = 23816)
 
+    # Both user-data spellings may hold a config; reuse the token from the most recently
+    # written one so a token the app itself regenerated is not overwritten by a stale copy.
     $token = ''
-    foreach ($userDataPath in Get-AnythingAnalyzerUserDataPaths) {
+    $existingConfigs = foreach ($userDataPath in Get-AnythingAnalyzerUserDataPaths) {
         $configPath = Join-Path $userDataPath 'mcp-server-config.json'
-        if (-not (Test-Path -LiteralPath $configPath)) {
-            continue
+        if (Test-Path -LiteralPath $configPath -PathType Leaf) {
+            Get-Item -LiteralPath $configPath
         }
+    }
+    foreach ($configFile in @($existingConfigs | Sort-Object -Property LastWriteTimeUtc -Descending)) {
         try {
-            $existing = Get-Content -LiteralPath $configPath -Raw -Encoding utf8 | ConvertFrom-Json
+            $existing = Get-Content -LiteralPath $configFile.FullName -Raw -Encoding utf8 | ConvertFrom-Json
             if (-not [string]::IsNullOrWhiteSpace([string]$existing.authToken)) {
                 $token = [string]$existing.authToken
                 break
@@ -230,8 +234,10 @@ function Ensure-AnythingAnalyzerMcpConfig {
         $token = [Convert]::ToBase64String($tokenBytes)
     }
 
+    # "host" must be explicit: the app's DEFAULT_MCP_LISTEN_HOST is 0.0.0.0 (every interface).
     $payload = [ordered]@{
         enabled     = $true
+        host        = '127.0.0.1'
         port        = $Port
         authEnabled = $true
         authToken   = $token
@@ -242,7 +248,11 @@ function Ensure-AnythingAnalyzerMcpConfig {
             New-Item -ItemType Directory -Path $userDataPath -Force | Out-Null
         }
         $configPath = Join-Path $userDataPath 'mcp-server-config.json'
-        $payload | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $configPath -Encoding utf8
+        # No BOM: the app does JSON.parse(readFileSync(path, 'utf-8')); a BOM makes that throw,
+        # and it then silently falls back to enabled=false with a fresh token. Windows
+        # PowerShell's Set-Content -Encoding utf8 writes a BOM, hence WriteAllText.
+        $content = ($payload | ConvertTo-Json -Depth 4) + [Environment]::NewLine
+        [System.IO.File]::WriteAllText($configPath, $content, [System.Text.UTF8Encoding]::new($false))
     }
 
     return $token

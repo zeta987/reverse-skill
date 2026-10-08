@@ -133,6 +133,24 @@ printf "pnpm|%s\n" "$*" >> "$BOOTSTRAP_PS_LOG"
     Ensure-Pnpm
     $commandLogAfter = Get-Content -LiteralPath $env:BOOTSTRAP_PS_LOG -Raw
     Assert-True ($commandLogAfter -eq $commandLogBefore) 'matching pnpm version triggered reinstall'
+    # Without the Electron-ABI better-sqlite3 binary the install must fail closed.
+    $sqliteMissingRejected = $false
+    try { Invoke-AnythingAnalyzerPinnedInstall -RepoDir $target -PnpmPath $pnpm -GitPath (Get-Command git).Source -PinnedCommit $pin } catch { $sqliteMissingRejected = $_.Exception.Message -match 'better_sqlite3\.node' }
+    Assert-True $sqliteMissingRejected 'missing better_sqlite3.node accepted or rejection reason changed'
+    $commandLog = Get-Content -LiteralPath $env:BOOTSTRAP_PS_LOG -Raw
+    Assert-True ($commandLog -match 'pnpm\|rebuild electron esbuild\s*$' -or $commandLog -match 'pnpm\|rebuild electron esbuild\r?\n') 'pnpm rebuild must target electron and esbuild only'
+    Assert-True ($commandLog -notmatch 'rebuild electron esbuild better-sqlite3') 'pnpm rebuild must not rebuild better-sqlite3 for the Node ABI'
+    Assert-True ($commandLog -match 'pnpm\|exec electron-builder install-app-deps') 'electron-builder install-app-deps must run after pnpm rebuild'
+
+    # Simulate the prebuilt that install-app-deps provides (gitignored node_modules in the real repo).
+    $sqliteBinary = Join-Path $target 'node_modules\.pnpm\better-sqlite3@12.4.1\node_modules\better-sqlite3\build\Release\better_sqlite3.node'
+    New-Item -ItemType Directory -Path (Split-Path $sqliteBinary -Parent) -Force | Out-Null
+    Set-Content -LiteralPath $sqliteBinary -Value 'inert fixture' -Encoding ascii
+    Assert-True ((Get-AnythingAnalyzerSqliteBinary -RepoDir $target) -eq $sqliteBinary) 'better_sqlite3.node is resolved from the pnpm store layout'
+    Set-Content (Join-Path $target '.gitignore') 'node_modules/'
+    Invoke-Git -Arguments @('-C', $target, 'add', '.gitignore')
+    Invoke-Git -Arguments @('-C', $target, 'commit', '--quiet', '-m', 'ignore node_modules')
+    $pin = (& git -C $target rev-parse HEAD).Trim()
     function Approve-AnythingAnalyzerBuildScripts { param([string]$RepoDir) Set-Content (Join-Path $RepoDir 'pnpm-workspace.yaml') 'generated'; Set-Content (Join-Path $RepoDir 'package.json') '{"mutated":true}' }
     $dirtyRejected = $false
     try { Invoke-AnythingAnalyzerPinnedInstall -RepoDir $target -PnpmPath $pnpm -GitPath (Get-Command git).Source -PinnedCommit $pin } catch { $dirtyRejected = $_.Exception.Message -match 'local changes' }

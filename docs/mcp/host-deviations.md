@@ -30,7 +30,7 @@ Status after the 2026-10-08 fork fixes (branch `dev/windows-mcp-clients`):
 | bkcrack | `Expand-ArchiveIntoDirectory` wraps `Get-ChildItem` in `@()`; the single-top-directory zip now extracts under `Set-StrictMode` |
 | seclists | `Ensure-GitCloneInstall` runs `git -c core.autocrlf=false` for init/fetch/checkout/status and persists `core.autocrlf=false` in the checkout. The existing host checkout stays dirty (16 status entries with and without the flag) because Defender removed payload files; do not restore them. The existing ProxyCat checkout reports clean both ways, so older checkouts are not regressed by the flag |
 | proxycat | `postInstallSteps` are now emitted as `[post-install]` warnings and in the results JSON (`post_install_steps`); the dependency install itself is still manual |
-| anything-analyzer | `Test-VsBuildToolsInstalled` asks `vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64` first, so VS 2026 Community counts |
+| anything-analyzer | `Test-VsBuildToolsInstalled` asks `vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64` first, so VS 2026 Community counts. Three more defects surfaced on the first real run and were fixed: (a) `mcp-server-config.json` was written with a UTF-8 BOM (`Set-Content -Encoding utf8` on Windows PowerShell 5.1); the app's `JSON.parse(readFileSync(path,'utf-8'))` threw, it fell back to `enabled=false` and generated a fresh token, so the server never started and `ANYTHING_ANALYZER_MCP_TOKEN` no longer matched. Now written with `WriteAllText` + `UTF8Encoding($false)`. (b) The file omitted `host`; the app default `DEFAULT_MCP_LISTEN_HOST` is `0.0.0.0`. Now `"host": "127.0.0.1"` is explicit. (c) `pnpm rebuild electron esbuild better-sqlite3` rebuilt better-sqlite3 for the Node ABI via pnpm's node-gyp 9.4.1, which fails on VS 2026 (`find VS unknown version 'undefined'`) and first wipes `build/Release`, destroying the Electron-ABI prebuilt. Now `pnpm rebuild electron esbuild` then `pnpm exec electron-builder install-app-deps`, and the install fails closed unless `node_modules/.pnpm/better-sqlite3@*/node_modules/better-sqlite3/build/Release/better_sqlite3.node` exists |
 | idapro (HTTP) | unchanged: still a second alias of the stdio-proxied backend |
 | burpsuite-mcp | manifest now registers the stdio bridge `node <repo>\burp-mcp-full\mcp-bridge.js` instead of `http://localhost:9876/mcp` |
 | ghidra-mcp | manifest describes the GhydraMCP path (user extension, loopback patch, `ghydra-stdio.py`, REST from 8192) instead of LaurieWired 8765 |
@@ -108,6 +108,20 @@ Verified 2026-10-08 with the case project
 `work/mcp-integration-research/ghidra/project/iwck-mcp-test.gpr`: listener
 `127.0.0.1:8192` only, bridge `instances_list` and `functions_list` succeed.
 Create a case-specific project per analysis; do not make `iwck.exe` a default.
+
+### Anything Analyzer (local-http-mcp, 23816)
+
+Verified working `%APPDATA%\anything-analyzer\mcp-server-config.json` (no BOM):
+
+```json
+{"enabled":true,"host":"127.0.0.1","port":23816,"authEnabled":true,"authToken":"<token>"}
+```
+
+Start it with `pnpm dev` from `%USERPROFILE%\Tools\anything-analyzer`; the Electron window
+**is** the service and dies at logoff. After a restart the listener is `127.0.0.1:23816` only:
+`initialize` with `Authorization: Bearer <token>` returns 200 and `serverInfo`
+`anything-analyzer`, without the header it returns 401. The bearer token lives in the User
+environment variable `ANYTHING_ANALYZER_MCP_TOKEN`, which the bootstrap sets from the same file.
 
 ### x64dbg
 
