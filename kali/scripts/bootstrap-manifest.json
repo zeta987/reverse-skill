@@ -534,7 +534,7 @@
         "postgres",
         "redis"
       ],
-      "kaliNote": "群体智能渗透框架。go install 或 Docker 运行。支持 MCP server 模式（pentestswarm mcp serve）。需要 Claude/Ollama API key。",
+      "kaliNote": "群体智能渗透框架。go install 或 Docker 运行。支持 MCP server 模式（pentestswarm mcp serve）。provider ollama 时不需要任何 API key（本地 Ollama + 可工具调用的模型，如 llama3.1:8b）；claude 等云端 provider 才需要 key。",
       "pinnedVersion": "v0.1.0"
     },
     {

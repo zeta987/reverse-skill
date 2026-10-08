@@ -18,10 +18,8 @@
     "pentestswarm": {
       "command": "pentestswarm",
       "args": ["mcp", "serve"],
-      "env": {
-        "PENTESTSWARM_ORCHESTRATOR_API_KEY": "<your-claude-or-ollama-key>"
-      },
-      "_comment": "Pentest Swarm AI。群体智能自主渗透框架。go install 或 Docker。支持 --swarm 模式。"
+      "env": {},
+      "_comment": "Pentest Swarm AI。群体智能自主渗透框架。go install 或 Docker。支持 --swarm 模式。provider ollama 不需要 API key（config.yaml 里 orchestrator.provider: ollama + 本地模型）；只有 claude 等云端 provider 才需要 PENTESTSWARM_ORCHESTRATOR_API_KEY。"
     },
     "jshook": {
       "command": "npx",
