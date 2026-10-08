@@ -12,7 +12,10 @@ param(
     [ValidateRange(0,65535)][int]$RedisPort = 6379,
     [ValidateRange(0,65535)][int]$Port = 0,
     [Parameter(Mandatory)][string]$LogDir,
-    [ValidateRange(1,180)][int]$WaitSeconds = 30
+    [ValidateRange(1,180)][int]$WaitSeconds = 30,
+    # PentestSwarm only: accept an API server that listens on every interface (upstream ignores
+    # server.host). Off by default: the gate fails closed and tells you to front it with a firewall rule.
+    [switch]$AllowWildcardBind
 )
 $ErrorActionPreference = 'Stop'
 $Backend = switch ($Backend.ToLowerInvariant()) { 'ida' { 'Ida' } 'x64dbg' { 'X64dbg' } 'pentestswarm' { 'PentestSwarm' } default { 'AnythingAnalyzer' } }
@@ -155,8 +158,11 @@ function Get-ListenerPid {
     $wildcardOwners = @($wildcardOwners | Select-Object -Unique)
     if ($owners.Count -eq 0 -and $wildcardOwners.Count -gt 0) {
         if ($Backend -eq 'PentestSwarm' -and $wildcardOwners.Count -eq 1) {
-            # pentestswarm v0.1.0 ignores server.host (api.Server.Start listens on ":<port>"), so a
-            # wildcard bind is the upstream behaviour, not a misconfiguration; it is reported, not refused.
+            # pentestswarm ignores server.host (api.Server.Start listens on ":<port>"), so a wildcard
+            # bind is the upstream behaviour. The gate still fails closed unless the caller opted in.
+            if (-not $AllowWildcardBind) {
+                throw "Port $Port is bound to all interfaces (0.0.0.0), not loopback only: pentestswarm serve ignores server.host. Refusing to use it. Either do not run the API server (mcp serve does not need it), add a Windows Firewall inbound-block rule for $Port and re-run with -AllowWildcardBind, or upgrade to a version that honours server.host."
+            }
             $script:bindAllInterfaces = $true
             return $wildcardOwners[0]
         }

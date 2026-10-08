@@ -354,12 +354,16 @@ the manifest's old "needs Claude/Ollama API key" note and the `doctor` wording:
    launcher deliberately scrubs the key variables, so it is not a free path either.
 2. **`serve` ignores `server.host`.** `internal/api/server.go` `Start()` is
    `app.Listen(":<port>")`; the live process binds `0.0.0.0:8080` (netstat, 2026-10-08,
-   IPv4 wildcard only). `config.yaml` records `host: "127.0.0.1"` as the intent, both
-   launchers report `bind_all_interfaces: true` with a stderr warning (the stdio launcher no longer
-starts `serve` unless asked), and the choice between
-   a fork patch (`Listen(host:port)` + `go build` from a copy of the module source, the same
-   pattern as `docs/mcp/patches/`), a Windows Firewall rule, or accepting the wildcard is
-   recorded here once the owner decides. Nothing in this fork patches the binary yet.
+   IPv4 wildcard only). `config.yaml` records `host: "127.0.0.1"` as the intent. The gate is
+   **fail-closed**: when the API server leg is requested (`-Backend PentestSwarm` in
+   `start-local-backend.ps1`, `--ensure-api-server` in the stdio launcher) and the listener is
+   wildcard-bound, both launchers refuse it with an error unless the caller opts in with
+   `-AllowWildcardBind` / `--allow-wildcard-bind` (env `PENTESTSWARM_ALLOW_WILDCARD_BIND=1`),
+   which is meant to be combined with a Windows Firewall inbound-block rule for the port. A
+   wildcard listener that merely exists while `mcp serve` runs (which never needs it) is only
+   reported as `bind_all_interfaces: true` with a stderr warning. Decision 2026-10-08: the owner
+   does not run `serve` at all, so no fork patch (`Listen(host:port)` + `go build`, the
+   `docs/mcp/patches/` pattern) and no firewall rule exist yet.
 3. **Protocol quirks** (verified live on 2026-10-08 with the four-frame smoke):
    `protocolVersion` is hard-coded `2024-11-05`; `server/discover` and `ping` answer
    `-32601` natively (no `legacy-mcp-stdio.py` wrapper for the dsh row); the `default` case
