@@ -224,9 +224,9 @@
       "bootstrapKind": "npm-global",
       "npmPackage": "agent-browser@0.31.1",
       "pinnedVersion": "0.31.1",
-      "postInstall": "npx playwright install chromium",
-      "installDir": "%LOCALAPPDATA%\\ms-playwright",
-      "docsUrl": "https://github.com/nicepkg/agent-browser",
+      "postInstall": "agent-browser install",
+      "installDir": "%USERPROFILE%\\.agent-browser\\browsers",
+      "docsUrl": "https://github.com/vercel-labs/agent-browser",
       "canAutoInstall": true,
       "verifyCommand": "agent-browser",
       "setupScript": "%SKILL_ROOT%\\browser-automation\\scripts\\setup.ps1"

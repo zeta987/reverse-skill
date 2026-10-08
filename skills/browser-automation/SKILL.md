@@ -191,7 +191,7 @@ npm run doctor:network
 
 | 工具 | 可自动安装 | 安装方式 | 说明 |
 |------|-----------|---------|------|
-| Playwright | ✓ | npm + npx playwright install | 浏览器自动化引擎 |
+| Playwright | ✓ | `agent-browser install`（Chrome for Testing，装入 `~\.agent-browser\browsers`） | 浏览器自动化引擎 |
 | agent-browser CLI | ✓ | npm install -g agent-browser | 浏览器操作 CLI |
 | Node.js | ✓ | winget | 前置依赖 |
 | OpenReverse | ✗ | 手动 clone + npm install | 实验阶段，依赖较重 |

@@ -67,13 +67,17 @@ else {
 
 # Step 4: Install Playwright and browsers
 if (-not $SkipBrowserInstall) {
-    Write-Step "Installing Playwright browsers (chromium)..."
-    & npx playwright install chromium
+    # agent-browser >= 0.31 manages its own Chrome for Testing build under
+    # %USERPROFILE%\.agent-browser\browsers. `npx playwright install chromium`
+    # would prompt for the playwright package on a host without it and hang
+    # a non-interactive bootstrap, so use the CLI's own installer.
+    Write-Step "Installing agent-browser browser binaries (Chrome)..."
+    & agent-browser install
     if ($LASTEXITCODE -ne 0) {
-        Write-Warning "Playwright browser install failed. You may need to run: npx playwright install chromium"
+        Write-Warning "Browser install failed. You may need to run: agent-browser install"
     }
     else {
-        Write-Step "Playwright chromium installed."
+        Write-Step "agent-browser Chrome installed."
     }
 
     # Record browser location
@@ -81,8 +85,7 @@ if (-not $SkipBrowserInstall) {
     try {
         $envBrowsersPath = $env:PLAYWRIGHT_BROWSERS_PATH
         if ([string]::IsNullOrWhiteSpace($envBrowsersPath)) {
-            # Default Playwright browser cache location on Windows
-            $defaultPath = Join-Path $env:LOCALAPPDATA 'ms-playwright'
+            $defaultPath = Join-Path $env:USERPROFILE '.agent-browser\browsers'
             if (Test-Path -LiteralPath $defaultPath) {
                 $playwrightPath = $defaultPath
             }

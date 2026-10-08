@@ -440,7 +440,8 @@ function Get-ReverseToolCatalog {
             VersionArgs = @()
             Fallbacks = @(
                 [pscustomobject]@{ Type = 'command'; Value = 'playwright' },
-                [pscustomobject]@{ Type = 'path'; Value = (Join-ReverseOptionalPath -Path $appData -ChildPath 'npm\playwright.ps1') }
+                [pscustomobject]@{ Type = 'path'; Value = (Join-ReverseOptionalPath -Path $appData -ChildPath 'npm\playwright.ps1') },
+                [pscustomobject]@{ Type = 'path'; Value = (Join-Path $userProfile '.agent-browser\browsers') }
             )
         }
         [pscustomobject]@{
