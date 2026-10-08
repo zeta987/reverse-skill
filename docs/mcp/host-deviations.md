@@ -132,8 +132,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File skills\scripts\mcp\start-loc
 ```
 
 Defaults: `-RepoDir %USERPROFILE%\Tools\anything-analyzer`, `-Port 23816`, `-ConfigPath
-%APPDATA%\anything-analyzer\mcp-server-config.json`, pnpm resolved from PATH (`.exe`, then
-`.cmd`, then the `.ps1` shim wrapped in the current host). Before `pnpm dev` is started the
+%APPDATA%\anything-analyzer\mcp-server-config.json`, pnpm = the first `.exe`/`.cmd`/`.bat`
+on PATH in PATH order (on this host `%LOCALAPPDATA%\pnpm\bin\pnpm.cmd`, 12.4.2; the WinGet
+`pnpm.exe` 12.8.1 sits later on PATH and is not preferred); the `.ps1` shim is used only when
+nothing else exists, wrapped in the current host. `-PnpmPath` pins the choice. Before
+`pnpm dev` is started the
 script validates the app config read-only and fails with a precise message when the file is
 missing, carries a UTF-8 BOM, is not JSON, has `enabled != true`, `host != 127.0.0.1`, a
 different `port`, `authEnabled != true`, an empty `authToken`, or an `authToken` that differs
@@ -143,9 +146,11 @@ SSE reply parsed) that must answer `serverInfo.name` `anything-analyzer`; an occ
 whose listener answers 401 or another server name is refused with that reason and left
 running. `pnpm dev` runs hidden with stdout/stderr under `-LogDir` next to the
 `AnythingAnalyzer-<stamp>.process.json` record (`pid` is the `pnpm` launcher, `executable`
-the resolved pnpm path, `repo_dir`, `config_path`). `electron-vite dev` builds in about 1 s on
-this host and the listener line `[MCP Server] Listening on http://127.0.0.1:23816/mcp`
-followed a few seconds later; `-WaitSeconds` accepts up to 180 for cold caches.
+the resolved pnpm path, `repo_dir`, `config_path`). In `anything-analyzer-dev.log` the main and preload vite
+builds report well under 1 s each and the listener line
+`[MCP Server] Listening on http://127.0.0.1:23816/mcp` appears after them (the log has no
+timestamps, so the wall-clock startup was not measured); `-WaitSeconds` accepts up to 180
+for cold caches.
 Fixture test: `skills/scripts/test-mcp-anything-analyzer-start.ps1` (stub `pnpm.cmd` +
 Python HTTP fixture; passes under Windows PowerShell 5.1 and pwsh 7; never touches the real
 app, config or token).
@@ -159,8 +164,9 @@ ends in `RangeError: Maximum call stack size exceeded`, logged as
 in `anything-analyzer-dev.err.log` (68 such entries on this host after the 2026-10-08 run).
 The session maps are cleared before the recursion, so the server keeps serving; the entries
 are noise, not a crash. The launcher's health probe closes its own `initialize` session with
-a `DELETE`, so expect one more entry per launcher run. Fix it upstream or in a fork patch under
-`docs/mcp/patches/`; do not edit the pinned checkout in place.
+a `DELETE`, so expect one more entry per launcher run. Wait for an upstream fix or carry a
+fork patch under `docs/mcp/patches/`; do not edit the pinned checkout in place, and do not
+report it upstream from this fork.
 
 ### x64dbg
 

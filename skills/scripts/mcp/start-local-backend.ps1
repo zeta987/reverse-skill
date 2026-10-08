@@ -186,7 +186,11 @@ function Resolve-PnpmLauncher {
     } else {
         $candidates = @(Get-Command pnpm -All -ErrorAction SilentlyContinue | ForEach-Object Source | Where-Object { $_ })
         if ($candidates.Count -eq 0) { throw 'pnpm was not found on PATH; pass -PnpmPath or install pnpm.' }
-        $candidates = @($candidates | Sort-Object { switch ([IO.Path]::GetExtension($_).ToLowerInvariant()) { '.exe' { 0 } '.cmd' { 1 } '.bat' { 1 } '.ps1' { 2 } default { 3 } } })
+        # Keep the user's PATH order (the same pnpm `pnpm dev` would use in a shell); only the
+        # .ps1 shim and extension-less shims are demoted because Start-Process cannot run them.
+        $direct = @($candidates | Where-Object { @('.exe', '.cmd', '.bat') -contains [IO.Path]::GetExtension($_).ToLowerInvariant() })
+        $candidates = if ($direct.Count -gt 0) { $direct } else { @($candidates | Where-Object { [IO.Path]::GetExtension($_).ToLowerInvariant() -eq '.ps1' }) }
+        if ($candidates.Count -eq 0) { throw 'pnpm on PATH has no .exe/.cmd/.bat/.ps1 launcher; pass -PnpmPath.' }
     }
     $chosen = $candidates[0]
     if ([IO.Path]::GetExtension($chosen).ToLowerInvariant() -eq '.ps1') {

@@ -66,8 +66,9 @@ backend, records a newly started PID, and starts without a target. It never
 kills an existing process or adds a login task. An occupied but unresponsive
 port is a reason to inspect the existing backend, not replace it blindly.
 `-Backend AnythingAnalyzer` takes `-RepoDir` (default
-`%USERPROFILE%\Tools\anything-analyzer`), `-PnpmPath` (default: pnpm from
-PATH, `.exe` before `.cmd` before `.ps1`), `-ConfigPath` (default
+`%USERPROFILE%\Tools\anything-analyzer`), `-PnpmPath` (default: the first
+`.exe`/`.cmd`/`.bat` pnpm on PATH in PATH order; the `.ps1` shim only as a last
+resort), `-ConfigPath` (default
 `%APPDATA%\anything-analyzer\mcp-server-config.json`) and `-Port` (23816).
 Its health probe is a Streamable HTTP `initialize` with
 `Authorization: Bearer $ANYTHING_ANALYZER_MCP_TOKEN` that must return
