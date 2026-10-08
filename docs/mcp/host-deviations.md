@@ -376,7 +376,7 @@ Host components (all free; nothing paid, no provider key anywhere):
 | Redis | `winget install Memurai.MemuraiDeveloper` (4.1.2, free developer edition, Windows service `Memurai`) — see the status line below | `doctor` dials 6379 only; both launchers treat a closed 6379 as a **warning** (they try `Start-Service`/`sc start Memurai` first) because v0.1.0 never opens Redis |
 | Ollama | `%LOCALAPPDATA%\Programs\Ollama\ollama.exe` 0.11.8 (not a service, no autostart) | launchers run `ollama serve` detached with `OLLAMA_HOST=127.0.0.1:11434`; model `llama3.1:8b` (the `pentestswarm config init` default; `internal/llm/ollama.go` names "Llama 3.1+" for tool calling; 4.92 GB from `registry.ollama.ai`) — see the status line below |
 | Docker | Desktop 29.8.2 running (autostart) | not needed by this stack; only the bundled labs use it |
-| config | `%USERPROFILE%\.pentestswarm\config.yaml` (viper's second search path after `./config.yaml`; both launchers pass `--config` explicitly because `HOME` is empty on Windows and Codex strips `USERPROFILE`) | Target shape: `server.host 127.0.0.1`, `server.port 8080`, `orchestrator.provider claude`, `model claude-sonnet-5-5`, `endpoint https://<relay-host>` (→ `ANTHROPIC_BASE_URL`, child only), `api_key ""` (User env only), `context_window 200000`, `database.*` as above with `password ""`, `redis 127.0.0.1:6379`, `intelligence.enabled false`. The file on disk still carries the previous `openai` shape (write pending, see above). The `openai` (v0.2.x) and `ollama` shapes stay supported by both launchers |
+| config | `%USERPROFILE%\.pentestswarm\config.yaml` (viper's second search path after `./config.yaml`; both launchers pass `--config` explicitly because `HOME` is empty on Windows and Codex strips `USERPROFILE`) | Final shape (option A, v0.2.31): `server.host 127.0.0.1`, `server.port 8080`, `orchestrator.provider openai`, `model gpt-6.1-sol`, `endpoint https://<relay-host>/v1` (the owner's private OpenAI-compatible relay; hostname intentionally not recorded here), `api_key ""` (User env only), `context_window 128000`, `database.*` as above with `password ""`, `redis 127.0.0.1:6379`, `intelligence.enabled false`. The `claude` and `ollama` shapes stay supported by both launchers |
 
 Status line (updated as the host steps land): Postgres role/db ✅, `config.yaml` ✅,
 `pentestswarm serve` verified once on 2026-10-08 through `pentestswarm-stdio.py --check-only
@@ -399,7 +399,7 @@ from an elevated prompt with `/l*v`, or `docker run -d --name redis -p 127.0.0.1
 redis:7-alpine` (Docker Desktop is up). Redis only matters for `doctor`.
 
 Provider decision (2026-10-08): the owner chose their own OpenAI-compatible relay
-(`https://<relay-host>/v1`) over a local Ollama model. The relay key lives only in the
+(`https://<relay-host>/v1`; the real hostname lives only in `config.yaml` on the host) over a local Ollama model. The relay key lives only in the
 User environment variable `PENTESTSWARM_ORCHESTRATOR_API_KEY` (viper's env override for
 `orchestrator.api_key`); it is never in `config.yaml`, the repo, a client config or a log. Both
 launchers read it from the process environment, else `HKCU\Environment`, and hand it only to
