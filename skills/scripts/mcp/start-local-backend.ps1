@@ -113,9 +113,10 @@ function Get-BackendHealth {
             $reply = Invoke-McpStreamableHttp -Uri "http://127.0.0.1:$Port/mcp" -Method POST -Body $init -BearerToken $token
             $serverInfo = $null
             if ($reply.message -and $reply.message.PSObject.Properties.Name -contains 'result') { $serverInfo = $reply.message.result.serverInfo }
-            if ($reply.session_id) {
-                # Close the probe session. The pinned app's transport.onclose -> srv.close() recursion
-                # logs one RangeError per close (documented upstream bug); the session is still removed.
+            if ($reply.session_id -and $env:ANYTHING_ANALYZER_CLOSE_SESSIONS -eq '1') {
+                # Opt-in only: an explicit DELETE is the one path that fires the pinned app's
+                # transport.onclose -> srv.close() -> transport.close() recursion (RangeError spam,
+                # one reported crash). By default the probe session is left to the app.
                 try { Invoke-McpStreamableHttp -Uri "http://127.0.0.1:$Port/mcp" -Method DELETE -BearerToken $token -SessionId $reply.session_id -TimeoutMs 1500 | Out-Null } catch { }
             }
             if ($serverInfo -and [string]$serverInfo.name -eq 'anything-analyzer') {

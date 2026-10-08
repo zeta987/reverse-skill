@@ -296,7 +296,9 @@ try:
     assert 'started pnpm dev' in started['stderr'] and 'listener ready' in started['stderr'], started['stderr']
     # The fixture must survive the launcher's exit (detached): /owner still answers after communicate() returned.
     assert http_get(port, '/owner')['pid'] == owner['pid'], 'detached fixture died with the launcher'
-    assert owner['sessions'] == 0 or http_get(port, '/owner')['sessions'] == 0, 'relay/probe sessions were not closed with DELETE'
+    # Sessions are deliberately NOT closed: an explicit DELETE is the path that trips the pinned
+    # app's onclose recursion. The fixture therefore keeps the probe and relay sessions.
+    assert http_get(port, '/owner')['sessions'] >= 1, 'expected the probe/relay sessions to be left open (no DELETE by default)'
     report['fresh_start'] = {'exit_code': started['exit_code'], 'frames': len(started['frames']), 'launcher_pid': record['pid']}
 
     # --- 3. reuse: healthy listener, config not re-read, no new process ---

@@ -119,6 +119,18 @@ def mcp_post(port, token, payload, session_id=None, timeout=4.0, method='POST'):
         return response.status, response.headers.get('mcp-session-id', ''), parse_mcp_body(response.headers.get('Content-Type', ''), text)
 
 
+def close_session(port, token, session_id):
+    """Explicit DELETE is the one code path that fires the pinned app's transport.onclose ->
+    srv.close() -> transport.close() recursion (RangeError spam, one reported crash), so
+    sessions are left to the app by default; ANYTHING_ANALYZER_CLOSE_SESSIONS=1 opts in."""
+    if os.environ.get('ANYTHING_ANALYZER_CLOSE_SESSIONS') != '1':
+        return
+    try:
+        mcp_post(port, token, None, session_id=session_id, timeout=1.5, method='DELETE')
+    except (urllib.error.URLError, OSError, ValueError):
+        pass
+
+
 def probe(port, token):
     """Classify the listener: ('ok', info) | ('down', why) | ('unauthorized', why) | ('wrong', why)."""
     try:
@@ -130,12 +142,7 @@ def probe(port, token):
     except (urllib.error.URLError, OSError, ValueError) as error:
         return 'down', f'no MCP reply: {error}'
     if session_id:
-        # Close the probe session. The pinned app's transport.onclose -> srv.close() recursion
-        # logs one RangeError per close (documented upstream bug); the session is still removed.
-        try:
-            mcp_post(port, token, None, session_id=session_id, timeout=1.5, method='DELETE')
-        except (urllib.error.URLError, OSError, ValueError):
-            pass
+        close_session(port, token, session_id)
     result = (message or {}).get('result') if isinstance(message, dict) else None
     info = (result or {}).get('serverInfo') if isinstance(result, dict) else None
     if isinstance(info, dict) and info.get('name') == SERVER_NAME:
@@ -405,10 +412,7 @@ def run_relay(args, token, mcp_fd):
             else:
                 log(f'backend unreachable for a notification: {error}')
     if session_id:
-        try:
-            mcp_post(args.port, token, None, session_id=session_id, timeout=1.5, method='DELETE')
-        except (urllib.error.URLError, OSError, ValueError):
-            pass
+        close_session(args.port, token, session_id)
     return 0
 
 

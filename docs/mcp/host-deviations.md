@@ -162,12 +162,16 @@ disconnect (a `DELETE /mcp` session close, a dropped connection, a client restar
 ends in `RangeError: Maximum call stack size exceeded`, logged as
 `Exception in PromiseRejectCallback` from `@modelcontextprotocol/sdk` `webStandardStreamableHttp.js`
 in `anything-analyzer-dev.err.log` (68 such entries on this host after the 2026-10-08 run).
-The session maps are cleared before the recursion, so the server keeps serving; the entries
-are noise, not a crash. The launcher's health probe closes its own `initialize` session with
-a `DELETE`, so expect one more entry per launcher run. Wait for an upstream fix or carry a
-fork patch under `docs/mcp/patches/`; do not edit the pinned checkout in place, and do not
-report it upstream from this fork. Because of this bug both launchers treat "port open but
-`initialize` fails" as unhealthy and stop with the reason instead of retrying in a loop.
+The session maps are cleared before the recursion, so the server usually keeps serving, but
+the owner saw it crash once on 2026-10-08. In the SDK code the only caller of
+`transport.close()` during normal traffic is an explicit `DELETE /mcp` (session
+termination); a dropped connection or a killed client never fires it. Both launchers and the
+built-in relay therefore **never send `DELETE`** by default and leave their `initialize`
+sessions to the app (two small in-memory map entries each); `ANYTHING_ANALYZER_CLOSE_SESSIONS=1`
+opts back in. Wait for an upstream fix or carry a fork patch under `docs/mcp/patches/`; do not
+edit the pinned checkout in place, and do not report it upstream from this fork. Because of
+this bug both launchers also treat "port open but `initialize` fails" as unhealthy and stop
+with the reason instead of retrying in a loop.
 
 #### Auto-start from the MCP clients (stdio launcher)
 
@@ -186,8 +190,9 @@ not imported), so the tested bridge interpreter `D:\WIN_MCP\reverse-mcp-python\S
    rewrote the token still connects. The token is never taken from an argument and never
    written to a client config; `mcp-remote` receives it only through the child environment.
 3. Health = authenticated Streamable HTTP `initialize` on `127.0.0.1:<port>/mcp` (SSE parsed,
-   `serverInfo.name` must be `anything-analyzer`, probe session closed with `DELETE`). Healthy
-   → reuse. Open but 401 / other server / other name → stop with that reason, nothing killed.
+   `serverInfo.name` must be `anything-analyzer`; the probe session is left open, see the
+   `DELETE` note above). Healthy → reuse. Open but 401 / other server / other name → stop
+   with that reason, nothing killed.
 4. Down → read-only validation of `%APPDATA%\anything-analyzer\mcp-server-config.json`
    (same nine checks as the PowerShell entrypoint, including token == env), then the named
    mutex `Local\reverse-skill-AnythingAnalyzer-<port>` shared with `start-local-backend.ps1`
@@ -205,9 +210,11 @@ not imported), so the tested bridge interpreter `D:\WIN_MCP\reverse-mcp-python\S
      run as `node.exe <nodejs>\node_modules\npm\bin\npx-cli.js -y …` instead of `cmd /c npx`:
      a quoted `C:\Program Files\nodejs\npx.cmd` plus a quoted header value is exactly the case
      where `cmd.exe` strips the first and last quote. mcp-remote expands `${VAR}` itself (log
-     line `Replacing ${ANYTHING_ANALYZER_MCP_TOKEN} with environment value`). Side effect: it
-     keeps state under `%USERPROFILE%\.mcp-auth\mcp-remote-0.14.3\` (older `0.1.17`/`0.1.29`
-     folders from the Jina registration are already there). First use downloads it via npx.
+     line `Replacing ${ANYTHING_ANALYZER_MCP_TOKEN} with environment value`). Side effects: first
+     use downloads it into the npx cache (`%APPDATA%\npm-cache\_npx\`), and mcp-remote keeps
+     OAuth state under `%USERPROFILE%\.mcp-auth\` (folders from `0.1.17` to `v1`, 2025-06 to
+     2026-08-27, already exist from the Jina registration; the bearer-header smoke runs on
+     2026-10-08 created no new folder there).
    - `--proxy relay` (or `ANYTHING_ANALYZER_PROXY=relay`): built-in JSON-RPC relay, one POST
      per stdin frame, SSE/JSON answer written as one line, `mcp-session-id` learned from
      `initialize`, notifications/responses expect 202 and emit nothing, no standalone GET
@@ -223,9 +230,11 @@ not imported), so the tested bridge interpreter `D:\WIN_MCP\reverse-mcp-python\S
 
 Client startup timeouts are the real constraint, not `--wait`: Codex gives a stdio server
 `startup_timeout_sec` = 10 by default, Claude Code about 30 s (`MCP_TIMEOUT` in ms, reports
-say the SDK caps it near 60 s). A warm `pnpm dev` (vite builds < 1 s each, then Electron) fits
-inside 30 s on this host; a cold cache may not, in which case the first client attempt fails
-and the next one reuses the app the first attempt left running. Set the Codex timeout
+say the SDK caps it near 60 s). What the dev log supports: the two vite builds take well
+under 1 s each; the Electron startup time until `[MCP Server] Listening` is **not measured**
+(no timestamps, and the real app was not started from the session that wrote this). If a
+start exceeds the client's limit, that client's first attempt fails and its next attempt (or
+any other client) reuses the app the first attempt left running. Set the Codex timeout
 explicitly (below) and `MCP_TIMEOUT=90000` for Claude Code when the cold start matters.
 
 Shapes to paste (repo = `D:\Data\Coding_Github\Reverse\reverse-skill`, all four files
@@ -270,11 +279,15 @@ startup_timeout_sec = 120
     cwd: 'D:\Data\Coding_Github\Reverse\reverse-skill\skills\scripts\mcp'
 ```
 
-`bootstrap-reverse.ps1 -Capability anything-analyzer -McpHostTarget …` now writes this stdio
-shape (manifest `mcpBridgeLauncher`; interpreter from `REVERSE_MCP_BRIDGE_PYTHON`, else the
-first `python` on PATH, which is safe because the launcher is stdlib-only) instead of the
-`url` + `Authorization` header form. Set `REVERSE_MCP_BRIDGE_PYTHON=D:\WIN_MCP\reverse-mcp-python\Scripts\python.exe`
-before running it on this host to get the paths above verbatim.
+`bootstrap-reverse.ps1 -Capability anything-analyzer -McpHostTarget …` now writes the
+`command`/`args` part of this stdio shape (manifest `mcpBridgeLauncher`; interpreter from
+`REVERSE_MCP_BRIDGE_PYTHON`, else the first `python` on PATH, which is safe because the
+launcher is stdlib-only) instead of the `url` + `Authorization` header form. Set
+`REVERSE_MCP_BRIDGE_PYTHON=D:\WIN_MCP\reverse-mcp-python\Scripts\python.exe` before running it
+on this host to get the paths above verbatim. The two Codex-only keys (`env_vars`,
+`startup_timeout_sec`) are **not** written by bootstrap; add them by hand, otherwise Codex
+stays on its 10 s startup default (the token itself is covered by the launcher's `HKCU`
+fallback).
 
 Manual alternative (kept for a client without stdio or for debugging): the plain HTTP
 registration `{"type":"http","url":"http://127.0.0.1:23816/mcp","headers":{"Authorization":"Bearer ${ANYTHING_ANALYZER_MCP_TOKEN}"}}`
