@@ -261,16 +261,28 @@ function Test-PentestSwarmConfig {
     $portValue = if ($config.ContainsKey('server.port')) { $config['server.port'] } else { '<missing>' }
     if ($portValue -ne "$ExpectedPort") { throw "pentestswarm config server.port is '$portValue', expected $ExpectedPort`: $Path" }
     $provider = if ($config.ContainsKey('orchestrator.provider')) { $config['orchestrator.provider'] } else { '<missing>' }
-    if ($provider -ne 'ollama') { throw "pentestswarm config orchestrator.provider is '$provider', expected ollama (no paid provider): $Path" }
-    if ($config.ContainsKey('orchestrator.api_key') -and $config['orchestrator.api_key']) { throw "pentestswarm config orchestrator.api_key is set; it must stay empty with the ollama provider: $Path" }
+    if ($provider -ne 'ollama' -and $provider -ne 'openai') { throw "pentestswarm config orchestrator.provider is '$provider', expected one of ollama, openai: $Path" }
+    if ($config.ContainsKey('orchestrator.api_key') -and $config['orchestrator.api_key']) { throw "pentestswarm config orchestrator.api_key is set; keys never live in the file (use the PENTESTSWARM_ORCHESTRATOR_API_KEY User environment variable): $Path" }
     if (-not $config.ContainsKey('orchestrator.model') -or -not $config['orchestrator.model']) { throw "pentestswarm config orchestrator.model is empty: $Path" }
     $endpoint = if ($config.ContainsKey('orchestrator.endpoint')) { $config['orchestrator.endpoint'] } else { '' }
-    $endpointMatch = [regex]::Match($endpoint, '^http://(127\.0\.0\.1|localhost)(?::(\d+))?/?$')
-    $expectedOllama = if ($ExpectedOllamaPort -gt 0) { $ExpectedOllamaPort } else { 11434 }
-    if (-not $endpointMatch.Success) { throw "pentestswarm config orchestrator.endpoint is '$(if ($endpoint) { $endpoint } else { '<missing>' })', expected http://127.0.0.1:$expectedOllama`: $Path" }
-    $endpointPort = if ($endpointMatch.Groups[2].Value) { [int]$endpointMatch.Groups[2].Value } else { 80 }
-    if ($ExpectedOllamaPort -gt 0 -and $endpointPort -ne $ExpectedOllamaPort) { throw "pentestswarm config orchestrator.endpoint uses port $endpointPort, expected $ExpectedOllamaPort`: $Path" }
+    if ($provider -eq 'ollama') {
+        $endpointMatch = [regex]::Match($endpoint, '^http://(127\.0\.0\.1|localhost)(?::(\d+))?/?$')
+        $expectedOllama = if ($ExpectedOllamaPort -gt 0) { $ExpectedOllamaPort } else { 11434 }
+        if (-not $endpointMatch.Success) { throw "pentestswarm config orchestrator.endpoint is '$(if ($endpoint) { $endpoint } else { '<missing>' })', expected http://127.0.0.1:$expectedOllama`: $Path" }
+        $endpointPort = if ($endpointMatch.Groups[2].Value) { [int]$endpointMatch.Groups[2].Value } else { 80 }
+        if ($ExpectedOllamaPort -gt 0 -and $endpointPort -ne $ExpectedOllamaPort) { throw "pentestswarm config orchestrator.endpoint uses port $endpointPort, expected $ExpectedOllamaPort`: $Path" }
+    } else {
+        # openai: an OpenAI-compatible relay over TLS (or a loopback relay); the key is environment-only.
+        if (-not [regex]::IsMatch($endpoint, '^(https://[^/\s]+|http://(127\.0\.0\.1|localhost)(?::\d+)?)(/\S*)?$')) { throw "pentestswarm config orchestrator.endpoint is '$(if ($endpoint) { $endpoint } else { '<missing>' })', expected an https:// (or loopback http://) OpenAI-compatible base URL: $Path" }
+        if ([string]::IsNullOrWhiteSpace((Get-OrchestratorApiKey))) { throw 'PENTESTSWARM_ORCHESTRATOR_API_KEY is not set in the process or User environment; the openai provider cannot authenticate. The value is never read from a file or argument.' }
+    }
     return $config
+}
+function Get-OrchestratorApiKey {
+    # The owner's relay credential: process scope first, else the persisted User value. Never printed.
+    $value = [string]$env:PENTESTSWARM_ORCHESTRATOR_API_KEY
+    if ([string]::IsNullOrWhiteSpace($value)) { $value = [string][Environment]::GetEnvironmentVariable('PENTESTSWARM_ORCHESTRATOR_API_KEY', 'User') }
+    return $value
 }
 function Test-LoopbackPort {
     param([int]$ProbePort)
@@ -291,15 +303,24 @@ function Invoke-WithScrubbedProviderEnv {
     # Start-Process inherits this process's environment, so provider/API-key variables are removed
     # around every pentestswarm-related spawn (no paid provider, ever) and the database password is
     # handed only to `pentestswarm serve`. Mirrors child_environment() in pentestswarm-stdio.py.
-    param([scriptblock]$Body, [switch]$KeepDatabasePassword)
+    param([scriptblock]$Body, [switch]$KeepDatabasePassword, [switch]$KeepOrchestratorApiKey)
     $saved = @{}
     foreach ($entry in (Get-ChildItem Env:)) {
         $upper = $entry.Name.ToUpperInvariant()
         $scrub = ($upper -eq 'ANTHROPIC_API_KEY') -or $upper.StartsWith('PENTESTSWARM_ORCHESTRATOR_') -or $upper.StartsWith('PENTESTSWARM_AGENTS_') -or ((-not $KeepDatabasePassword) -and $upper -eq 'PENTESTSWARM_DATABASE_PASSWORD')
         if ($scrub) { $saved[$entry.Name] = $entry.Value; [Environment]::SetEnvironmentVariable($entry.Name, $null, 'Process') }
     }
+    $savedApiKey = $null
+    if ($KeepOrchestratorApiKey) {
+        # Hand the relay credential (process, else User scope) to this child only; the saved copy restores the original state.
+        $savedApiKey = $env:PENTESTSWARM_ORCHESTRATOR_API_KEY
+        [Environment]::SetEnvironmentVariable('PENTESTSWARM_ORCHESTRATOR_API_KEY', (Get-OrchestratorApiKey), 'Process')
+    }
     try { return (& $Body) }
-    finally { foreach ($name in $saved.Keys) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') } }
+    finally {
+        if ($KeepOrchestratorApiKey) { [Environment]::SetEnvironmentVariable('PENTESTSWARM_ORCHESTRATOR_API_KEY', $savedApiKey, 'Process') }
+        foreach ($name in $saved.Keys) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }
+    }
 }
 function Ensure-RedisListener {
     # Warning only: pentestswarm v0.1.0 never opens Redis; `pentestswarm doctor` merely dials the port.
@@ -374,7 +395,12 @@ if ($Backend -eq 'PentestSwarm') {
     $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
     $dependencyStamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
     $dependencies['redis'] = Ensure-RedisListener -ProbePort $RedisPort
-    $dependencies['ollama'] = Ensure-OllamaListener -ProbePort $OllamaPort -Model $swarmConfig['orchestrator.model'] -Preferred $OllamaPath -LogDirectory $LogDir -Stamp $dependencyStamp -Wait $WaitSeconds
+    $dependencies['provider'] = $swarmConfig['orchestrator.provider']
+    if ($swarmConfig['orchestrator.provider'] -eq 'ollama') {
+        $dependencies['ollama'] = Ensure-OllamaListener -ProbePort $OllamaPort -Model $swarmConfig['orchestrator.model'] -Preferred $OllamaPath -LogDirectory $LogDir -Stamp $dependencyStamp -Wait $WaitSeconds
+    } else {
+        $dependencies['ollama'] = @{ state = 'not_required' }
+    }
 }
 if (Test-BackendPort) {
     $health = Get-BackendHealth
@@ -423,7 +449,8 @@ if ($Backend -eq 'Ida') {
     $savedDbPassword = $env:PENTESTSWARM_DATABASE_PASSWORD
     if ([string]::IsNullOrWhiteSpace($savedDbPassword)) { $env:PENTESTSWARM_DATABASE_PASSWORD = [Environment]::GetEnvironmentVariable('PENTESTSWARM_DATABASE_PASSWORD', 'User') }
     try {
-        $process = Invoke-WithScrubbedProviderEnv -KeepDatabasePassword -Body { Start-Process -FilePath $Executable -ArgumentList @('serve', '--config', $ConfigPath, '--port', "$Port") -WorkingDirectory $LogDir -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru }
+        $keepKey = ($swarmConfig['orchestrator.provider'] -eq 'openai')
+        $process = Invoke-WithScrubbedProviderEnv -KeepDatabasePassword -KeepOrchestratorApiKey:$keepKey -Body { Start-Process -FilePath $Executable -ArgumentList @('serve', '--config', $ConfigPath, '--port', "$Port") -WorkingDirectory $LogDir -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru }
     } finally { $env:PENTESTSWARM_DATABASE_PASSWORD = $savedDbPassword }
     $record = @{backend=$Backend;pid=$process.Id;port=$Port;executable=$Executable;config_path=$ConfigPath;started_at=(Get-Date -Format o);sample_opened=$false}
 } else {
