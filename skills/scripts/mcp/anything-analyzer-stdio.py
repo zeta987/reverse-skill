@@ -312,8 +312,116 @@ def resolve_pnpm(explicit):
     return found
 
 
+class WmiProcess:
+    """Handle for a process created through WMI (parent = WmiPrvSE, outside our job and PID tree)."""
+
+    def __init__(self, pid):
+        self.pid = pid
+        self.returncode = None
+
+    def poll(self):
+        if self.returncode is not None:
+            return self.returncode
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        handle = kernel32.OpenProcess(0x1000, False, self.pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            self.returncode = -1  # already gone and reaped
+            return self.returncode
+        try:
+            code = wintypes.DWORD()
+            if kernel32.GetExitCodeProcess(handle, ctypes.byref(code)) and code.value != 259:  # STILL_ACTIVE
+                self.returncode = int(code.value)
+        finally:
+            kernel32.CloseHandle(handle)
+        return self.returncode
+
+
+def spawn_via_wmi(pnpm, repo_dir, stdout_path, stderr_path):
+    """Create `pnpm dev` through Win32_Process.Create so its parent is WmiPrvSE.exe.
+
+    Some MCP clients (Codex) end their servers' whole descendant tree at exit, and
+    CREATE_BREAKAWAY_FROM_JOB does not change the parent PID, so the app died with the
+    client. A WMI-created process is neither in the client's Job Object nor in its
+    PID tree. The launcher's environment (including the repaired PATH) is handed over
+    through Win32_ProcessStartup.EnvironmentVariables, and the script goes to PowerShell
+    over stdin so no value appears on a command line. Returns None when WMI is unusable."""
+    if os.name != 'nt' or os.environ.get('ANYTHING_ANALYZER_SPAWN', '').lower() == 'popen':
+        return None
+    # Windows PowerShell 5.1 by absolute path: PATH order may put pwsh 7 or a Store alias first,
+    # and the CIM call below was only verified against the in-box host.
+    powershell = os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), r'System32\WindowsPowerShell\v1.0\powershell.exe')
+    if not os.path.isfile(powershell):
+        powershell = shutil.which('powershell') or ''
+    if not powershell or not os.path.isfile(powershell):
+        return None
+
+    def ps_literal(text):
+        return "'" + str(text).replace("'", "''") + "'"
+
+    # Environment: do NOT use Win32_ProcessStartup.EnvironmentVariables. Supplying it from a
+    # restricted caller made WMI report success while the child died before writing a byte
+    # (and a full caller got return code 21); without it the child receives the user's full
+    # default environment block (User + Machine PATH, APPDATA, ...), which is what pnpm needs.
+    # Only non-secret launcher/test variables are forwarded, as `set` statements on the command line.
+    forwarded = []
+    for key, value in sorted(os.environ.items()):
+        if not (key.startswith('REVERSE_TEST_') or key.startswith('ANYTHING_ANALYZER_')) or key == TOKEN_ENV:
+            continue
+        if '"' in value or '\n' in value or '\r' in value or '"' in key:
+            continue
+        forwarded.append(f'set "{key}={value}"&& ')
+    # One merged log; stderr_path stays as an empty marker. /s: strip exactly the outer quotes.
+    inner = os.environ.get('ANYTHING_ANALYZER_WMI_DEBUG_CMD') or f'"{pnpm}" dev'  # debug hook: swap the payload
+    # The child creates the log directory itself: a sandboxed client (Claude Code's tool shell,
+    # Codex) may see a virtualized %LOCALAPPDATA%\reverse-skill that does not exist on the real
+    # filesystem the WMI child runs on; without the directory cmd exits 1 before running pnpm.
+    log_dir_literal = str(Path(stdout_path).parent)
+    command_line = (f'cmd.exe /d /s /c "mkdir "{log_dir_literal}" 2>nul & {"".join(forwarded)}{inner} '
+                    f'1>>"{stdout_path}" 2>>&1"')
+    script = (
+        "$ErrorActionPreference = 'Stop'\n"
+        "$startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }\n"
+        f"$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{ CommandLine = {ps_literal(command_line)}; CurrentDirectory = {ps_literal(repo_dir)}; ProcessStartupInformation = $startup }}\n"
+        "if ($r.ReturnValue -ne 0) { Write-Error ('Win32_Process.Create returned ' + $r.ReturnValue); exit 3 }\n"
+        "Write-Output $r.ProcessId\n"
+    )
+    debug_dump = os.environ.get('ANYTHING_ANALYZER_WMI_DEBUG', '')
+    if debug_dump:
+        # Diagnostics only (ANYTHING_ANALYZER_WMI_DEBUG=<file>): the generated script and PowerShell's result.
+        Path(debug_dump).write_text(script, encoding='utf-8')
+    try:
+        run = subprocess.run([powershell, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', '-'],
+                             input=script, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        log(f'WMI spawn unavailable ({error}); falling back to a direct detached spawn')
+        return None
+    if debug_dump:
+        Path(debug_dump + '.result.txt').write_text(
+            f'returncode={run.returncode}\n--- stdout ---\n{run.stdout}\n--- stderr ---\n{run.stderr}\n', encoding='utf-8')
+    pid_text = (run.stdout or '').strip().splitlines()[-1] if (run.stdout or '').strip() else ''
+    if run.returncode != 0 or not pid_text.isdigit():
+        detail = (run.stderr or '').strip().splitlines()[-1:] or ['no process id returned']
+        log(f'WMI spawn failed ({detail[0][:160]}); falling back to a direct detached spawn')
+        return None
+    return WmiProcess(int(pid_text))
+
+
 def spawn_detached(pnpm, repo_dir, stdout_path, stderr_path):
-    """`pnpm dev` must outlive this launcher: no inherited stdio, own process group, own job."""
+    """`pnpm dev` must outlive this launcher: WMI-created (outside the client's job and PID
+    tree) when possible, otherwise no inherited stdio, own process group, own job."""
+    wmi = spawn_via_wmi(pnpm, repo_dir, stdout_path, stderr_path)
+    if wmi is not None:
+        # stderr is merged into stdout by the WMI child; keep the marker file so the pair stays complete.
+        Path(stderr_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(stderr_path).write_text(f'stderr is merged into {Path(stdout_path).name} (WMI-created process)\n', encoding='utf-8')
+        log('pnpm dev created through WMI (parent WmiPrvSE, outside the client process tree); '
+            f'its log is written on the real filesystem at {stdout_path} and may be invisible from a sandboxed shell')
+        return wmi
+    for path in (stdout_path, stderr_path):
+        Path(path).touch(exist_ok=True)
     command = [pnpm, 'dev']
     kwargs = {'cwd': str(repo_dir), 'stdin': subprocess.DEVNULL, 'close_fds': True}
     if os.name == 'nt':

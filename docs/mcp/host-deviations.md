@@ -239,6 +239,26 @@ not imported), so the tested bridge interpreter `D:\WIN_MCP\reverse-mcp-python\S
    pnpm or node cannot be resolved; values the client did pass are never overridden.
    Verified 2026-10-08 with three stripped-environment runs against the live app and a real
    `codex exec` handshake.
+   Detached start through WMI (2026-10-09): Codex ends its MCP servers' whole descendant tree
+   at exit and `CREATE_BREAKAWAY_FROM_JOB` does not change the parent PID, so `pnpm dev` died
+   with every Codex session. `spawn_via_wmi()` now creates `cmd.exe /d /s /c "mkdir <logdir> &
+   "<pnpm>" dev 1>>log 2>>&1"` through `Win32_Process.Create` (parent `WmiPrvSE.exe`, outside
+   the client's job and PID tree), falling back to the direct detached spawn when WMI is
+   unavailable. Two findings shaped it: `Win32_ProcessStartup.EnvironmentVariables` is not
+   usable (from a restricted caller the child "started" but died before writing a byte; a full
+   caller got return code 21), so the child gets the user's default environment block and only
+   `REVERSE_TEST_*` / `ANYTHING_ANALYZER_*` variables (never the token) are forwarded as `set`
+   statements; and **sandboxed shells see a virtualized filesystem**: the Claude Code tool shell
+   and Codex's MCP processes both created `%LOCALAPPDATA%\reverse-skill\...` and
+   `%APPDATA%\anything-analyzer\mcp-server-config.json` in their own view, while the WMI child
+   runs on the real filesystem where the directory did not exist and the config still held the
+   app's fallback (`enabled=false`, `host=0.0.0.0`). The child therefore creates the log directory
+   itself, and the real config was rewritten through a WMI-created `copy` from `%TEMP%` (which is
+   shared with the real filesystem). Check real-filesystem state through a WMI-created `dir`
+   before trusting what a sandboxed shell shows. Known limitation: Codex does not wait for a slow
+   server before its first turn, so the very first prompt issued within ~15 s of a cold start may
+   report anything-analyzer as unavailable; the app now survives the session, so the next
+   conversation reuses it (verified with `codex exec` twice).
    Both legs passed the three-message smoke (`initialize`, `server/discover` → `-32601`,
    `tools/list`) against the fake Streamable HTTP server in
    `skills/scripts/test-mcp-anything-analyzer-stdio.py`, which mirrors the SDK 1.29 transport
