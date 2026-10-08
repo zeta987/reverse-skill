@@ -230,6 +230,14 @@ not imported), so the tested bridge interpreter `D:\WIN_MCP\reverse-mcp-python\S
    child is assigned after spawn as a best effort and the log line says so.
    `ANYTHING_ANALYZER_MCP_REMOTE_COMMAND` (JSON argv array) replaces `node npx-cli.js` for
    tests and local overrides.
+   Restricted client environment: Codex starts MCP servers without `APPDATA`,
+   `LOCALAPPDATA`, `PATHEXT` and with a trimmed `PATH`, which made the config default
+   resolve to `%USERPROFILE%\anything-analyzer\...` and pnpm/node "not found" (Codex reported
+   `connection closed: initialize response`). `repair_environment()` now fills those from
+   the `Shell Folders` registry key and appends the persisted Machine/User `PATH` only when
+   pnpm or node cannot be resolved; values the client did pass are never overridden.
+   Verified 2026-10-08 with three stripped-environment runs against the live app and a real
+   `codex exec` handshake.
    Both legs passed the three-message smoke (`initialize`, `server/discover` → `-32601`,
    `tools/list`) against the fake Streamable HTTP server in
    `skills/scripts/test-mcp-anything-analyzer-stdio.py`, which mirrors the SDK 1.29 transport

@@ -471,6 +471,49 @@ try:
     else:
         report['mcp_remote'] = 'SKIPPED (set REVERSE_TEST_MCP_REMOTE=1)'
 
+    # --- 9. restricted client environment (Codex filters APPDATA/LOCALAPPDATA/PATHEXT and trims PATH) ---
+    if os.name == 'nt':
+        import winreg
+        probe = (
+            'import importlib.util, json, os, shutil, sys\n'
+            f'spec = importlib.util.spec_from_file_location("launcher", {str(launcher)!r})\n'
+            'module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)\n'
+            'repaired = module.repair_environment()\n'
+            'print(json.dumps({"repaired": repaired, "APPDATA": os.environ.get("APPDATA"), "LOCALAPPDATA": os.environ.get("LOCALAPPDATA"),\n'
+            '                  "PATHEXT": os.environ.get("PATHEXT"), "PATH": os.environ.get("PATH")}))\n'
+        )
+        stripped = {key: value for key, value in os.environ.items()
+                    if key.upper() not in ('APPDATA', 'LOCALAPPDATA', 'PATHEXT', 'PATH')}
+        stripped['PATH'] = os.environ.get('SystemRoot', r'C:\Windows') + r'\System32'
+        probe_run = subprocess.run([sys.executable, '-I', '-c', probe], env=stripped, capture_output=True, text=True, timeout=60)
+        assert probe_run.returncode == 0, f'repair_environment probe failed: {probe_run.stderr}'
+        repaired_env = json.loads(probe_run.stdout)
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders') as key:
+            expected_appdata = winreg.QueryValueEx(key, 'AppData')[0]
+        assert repaired_env['APPDATA'] == expected_appdata, f'APPDATA fallback: {repaired_env}'
+        assert repaired_env['LOCALAPPDATA'] and repaired_env['PATHEXT'], f'LOCALAPPDATA/PATHEXT fallback: {repaired_env}'
+        assert {'APPDATA', 'LOCALAPPDATA', 'PATHEXT'} <= set(repaired_env['repaired']), repaired_env['repaired']
+        user_path = ''
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, 'Environment') as key:
+                user_path = winreg.QueryValueEx(key, 'Path')[0]
+        except OSError:
+            pass
+        if user_path.strip(';'):
+            first_user_entry = os.path.expandvars(user_path.split(';')[0]).lower().rstrip('\\')
+            assert first_user_entry in {entry.lower().rstrip('\\') for entry in repaired_env['PATH'].split(';')}, f'persisted PATH was not appended: {repaired_env["PATH"]}'
+        # The launcher itself must still succeed end to end under that environment (explicit --pnpm/--config, relay leg).
+        restricted_run_env = {key: value for key, value in base_env.items() if key.upper() not in ('APPDATA', 'LOCALAPPDATA', 'PATHEXT')}
+        restricted_run_env['PATH'] = stripped['PATH']
+        restricted = subprocess.run(launcher_command(port, config, start_log, 'relay', ('--check-only',)),
+                                    env={**restricted_run_env, 'REVERSE_TEST_PORT': str(port)}, capture_output=True, text=True, timeout=60)
+        assert restricted.returncode == 0, f'restricted-env --check-only failed: {restricted.stderr}'
+        assert restricted.stdout == '', f'stdout must stay empty: {restricted.stdout!r}'
+        assert 'restricted client environment: filled' in restricted.stderr, restricted.stderr
+        report['restricted_environment'] = {'repaired': repaired_env['repaired'], 'check_only_exit': restricted.returncode}
+    else:
+        report['restricted_environment'] = 'SKIPPED (Windows only)'
+
     report['status'] = 'PASS'
     report['fixture_only'] = True
 finally:

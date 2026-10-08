@@ -75,6 +75,70 @@ def user_environment_token():
         return ''
 
 
+def registry_string(root_name, subkey, name):
+    """Read one REG_SZ/REG_EXPAND_SZ value; '' when absent or not on Windows."""
+    try:
+        import winreg
+    except ImportError:
+        return ''
+    root = getattr(winreg, root_name)
+    try:
+        with winreg.OpenKey(root, subkey) as key:
+            value, _ = winreg.QueryValueEx(key, name)
+            return str(value)
+    except OSError:
+        return ''
+
+
+def repair_environment():
+    """Fill in the environment a restricted MCP client leaves out.
+
+    Codex starts MCP servers with a filtered environment (no APPDATA/LOCALAPPDATA,
+    no PATHEXT, a minimal PATH), so the defaults below resolved to the wrong folder
+    and pnpm/node were "not found". Values the client did pass are never overridden;
+    the persisted Machine/User PATH is only appended when pnpm or node is missing.
+    Returns the names that were filled, for the stderr log."""
+    if os.name != 'nt':
+        return []
+    repaired = []
+    profile = os.environ.get('USERPROFILE', '')
+    if not profile:
+        drive, path = os.environ.get('HOMEDRIVE', ''), os.environ.get('HOMEPATH', '')
+        profile = (drive + path) if drive and path else str(Path.home())
+        os.environ['USERPROFILE'] = profile
+        repaired.append('USERPROFILE')
+    shell_folders = r'Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders'
+    for env_key, reg_name, relative in (('APPDATA', 'AppData', r'AppData\Roaming'),
+                                        ('LOCALAPPDATA', 'Local AppData', r'AppData\Local')):
+        if os.environ.get(env_key):
+            continue
+        os.environ[env_key] = registry_string('HKEY_CURRENT_USER', shell_folders, reg_name) or str(Path(profile) / relative)
+        repaired.append(env_key)
+    for env_key, default in (('SystemRoot', r'C:\Windows'), ('ProgramFiles', r'C:\Program Files')):
+        if not os.environ.get(env_key):
+            os.environ[env_key] = default
+            repaired.append(env_key)
+    if not os.environ.get('PATHEXT'):
+        os.environ['PATHEXT'] = '.COM;.EXE;.BAT;.CMD'
+        repaired.append('PATHEXT')
+    if not (shutil.which('pnpm') and shutil.which('node')):
+        persisted = ';'.join(filter(None, (
+            registry_string('HKEY_LOCAL_MACHINE', r'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path'),
+            registry_string('HKEY_CURRENT_USER', 'Environment', 'Path'))))
+        current = os.environ.get('PATH', '')
+        seen = {entry.lower().rstrip('\\') for entry in current.split(';') if entry}
+        additions = []
+        for entry in persisted.split(';'):
+            entry = os.path.expandvars(entry.strip())
+            if entry and entry.lower().rstrip('\\') not in seen:
+                seen.add(entry.lower().rstrip('\\'))
+                additions.append(entry)
+        if additions:
+            os.environ['PATH'] = ';'.join(([current] if current else []) + additions)
+            repaired.append('PATH')
+    return repaired
+
+
 def token_candidates():
     """Process env first, then the persisted User value (clients may filter or carry a stale env)."""
     candidates = []
@@ -572,6 +636,9 @@ def parse_args(argv):
 def main(argv=None):
     mcp_fd = park_stdout()
     install_termination_signals()
+    repaired = repair_environment()
+    if repaired:
+        log('restricted client environment: filled ' + ', '.join(repaired) + ' from the registry/defaults')
     args = parse_args(argv)
     try:
         candidates = token_candidates()
