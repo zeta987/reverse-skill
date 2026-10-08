@@ -330,8 +330,24 @@ every statement below was read from. Three upstream facts override the manifest'
    `pgxpool.NewWithConfig` is inside that package, `Migrate` has no caller) and `go.mod` has
    no Redis client. `campaign_status` merely formats a `http://localhost:8080/...` URL. The
    API server on 8080, Postgres and Redis are therefore only what `pentestswarm doctor`
-   (pure TCP dials) and the `campaign`/`scan --follow` CLI paths want; the launcher still
-   brings 8080 up because the brief and `doctor` expect it.
+   (pure TCP dials) and the `campaign`/`scan --follow` CLI paths want. The stdio launcher's
+   default chain is **Ollama only**; `--ensure-api-server` and `--redis-port 6379` are opt-in
+   legs for `doctor`. No MCP sampling either: `internal/mcp/server.go` handles exactly
+   `initialize`, `tools/list`, `tools/call`, `resources/list`, `resources/read` (lines 98-194,
+   nothing else in the tree mentions `sampling/createMessage`), so the swarm cannot borrow the
+   MCP client's model; the provider is built per tool call in `internal/engine/runner.go:161`
+   (`llm.NewProvider`), before recon, so `scan_target` and `quick_recon` (`tools.go:49`, `:84`)
+   both need it while `explain_finding` (`tools.go:110`, canned text), `campaign_status`
+   (`:122`, formats a URL) and `list_tools` (`:140`, static list) never touch an LLM. Providers
+   in v0.1.0 (`internal/llm/factory.go:48-80`, `config.go:286-288`): `claude`, `ollama`,
+   `lmstudio` only; there is no `openai` provider (the docs site describes a newer release).
+   `lmstudio` posts to `<endpoint>/v1/chat/completions` with no `Authorization` header and no
+   `tools` field (`lmstudio.go:44-55`, `:105-109`), so an OpenAI-compatible relay works only
+   keyless and only without tool calling; `ollama` is the one local provider that sends tools
+   (`ollama.go:54`). `claude` uses `anthropic-sdk-go` v1.26.0 with `option.WithAPIKey` only
+   (`claude.go:44`); that SDK reads `ANTHROPIC_BASE_URL` from the environment
+   (`client.go:34`), which is the only route to an Anthropic-compatible relay, and the
+   launcher deliberately scrubs the key variables, so it is not a free path either.
 2. **`serve` ignores `server.host`.** `internal/api/server.go` `Start()` is
    `app.Listen(":<port>")`; the live process binds `0.0.0.0:8080` (netstat, 2026-10-08,
    IPv4 wildcard only). `config.yaml` records `host: "127.0.0.1"` as the intent, both
@@ -358,11 +374,17 @@ Host components (all free; nothing paid, no provider key anywhere):
 | config | `%USERPROFILE%\.pentestswarm\config.yaml` (viper's second search path after `./config.yaml`; both launchers pass `--config` explicitly because `HOME` is empty on Windows and Codex strips `USERPROFILE`) | `server.host 127.0.0.1`, `server.port 8080`, `orchestrator.provider ollama`, `model llama3.1:8b`, `endpoint http://127.0.0.1:11434`, `api_key ""`, `context_window 32768`, `database.*` as above with `password ""`, `redis 127.0.0.1:6379`, `intelligence.enabled false` |
 
 Status line (updated as the host steps land): Postgres role/db ✅, `config.yaml` ✅,
-`pentestswarm serve` ✅ (started by `pentestswarm-stdio.py --check-only` on 2026-10-08,
-pid in `%LOCALAPPDATA%\reverse-skill\pentestswarm\PentestSwarm-<stamp>.process.json`,
-`GET /api/v1/health` → `{"service":"pentestswarm","status":"ok"}`), Memurai ⏳ (install
-awaiting the owner's approval), `ollama pull llama3.1:8b` ⏳ (4.92 GB, awaiting approval),
-`doctor` 8/8 ⏳, live `tools/list` through the launcher ⏳.
+`pentestswarm serve` verified once on 2026-10-08 through `pentestswarm-stdio.py --check-only
+--ensure-api-server` (`GET /api/v1/health` → `{"service":"pentestswarm","status":"ok"}`, bind
+`0.0.0.0:8080`) and then **stopped** at the owner's request because `mcp serve` does not need
+it; Memurai: approved, see the install note below; `ollama pull llama3.1:8b`: on hold (the
+owner is deciding whether a local model is wanted at all); `doctor` 8/8 and the live
+`tools/list` through the launcher wait on that decision.
+
+Memurai install note: `winget install --id Memurai.MemuraiDeveloper --exact --silent` was
+started on 2026-10-08 after the owner's approval; the MSI elevates through UAC, so the result
+(service `Memurai`, `bind 127.0.0.1` in `C:\Program Files\Memurai\memurai.conf`, listener on
+`127.0.0.1:6379`) is recorded here once the service is up.
 
 #### Agent-controlled start (same contract as the other backends)
 
@@ -374,7 +396,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File skills\scripts\mcp\start-loc
 Defaults: `-Executable` = `pentestswarm` on PATH, else `%USERPROFILE%\go\bin\pentestswarm.exe`;
 `-ConfigPath %USERPROFILE%\.pentestswarm\config.yaml`; `-Port 8080`; `-OllamaPath` = `ollama`
 on PATH, else `%LOCALAPPDATA%\Programs\Ollama\ollama.exe`; `-OllamaPort 11434`; `-RedisPort 6379`
-(`0` skips either dependency). Order: read-only `config.yaml` validation (`server.host`
+(`0` skips either dependency). This PowerShell entrypoint is the **full** chain for `doctor` and the campaign CLI (the stdio
+launcher below starts only Ollama by default). Order: read-only `config.yaml` validation (`server.host`
 `127.0.0.1`, `server.port` == `-Port`, `provider ollama`, empty `api_key`, non-empty `model`,
 loopback `endpoint` on `-OllamaPort`; each failure has its own message and nothing is started)
 → Redis (service start attempt, then warning) → Ollama (`GET /api/tags`; reuse, else
@@ -397,7 +420,10 @@ PowerShell 5.1 and pwsh 7).
 
 Every client registers [`pentestswarm-stdio.py`](../../skills/scripts/mcp/pentestswarm-stdio.py)
 (standard-library Python, run by the tested bridge interpreter) as a **stdio** server. It does
-the same validation and dependency chain as the PowerShell entrypoint, then `exec`s
+the same read-only validation, then only what `mcp serve` needs: Ollama (reuse, or `ollama
+serve` detached with `OLLAMA_HOST=127.0.0.1:<port>`; a missing model is a warning). The API
+server leg (`--ensure-api-server`) and the Redis probe (`--redis-port 6379`) are opt-in and
+exist for `pentestswarm doctor`, not for the tools. Then it `exec`s
 `pentestswarm mcp serve --config <path>` with stdin/stdout inherited (fd 1 is parked on stderr
 until that moment, so no diagnostic can reach the MCP channel) and its cwd set to
 `%LOCALAPPDATA%\reverse-skill\pentestswarm\work` (the swarm tools write `./reports` there, never
@@ -415,10 +441,12 @@ and `HKCU\Environment\Path` (`%VAR%` expanded). The resolved values are injected
 children (`USERPROFILE`, `HOMEDRIVE`/`HOMEPATH`, `APPDATA`, `LOCALAPPDATA`, `PATH`) because
 `os.UserHomeDir()` is used by the fp cache, NVD cache and `init`. Overrides: `--exe`/`PENTESTSWARM_EXE`,
 `--config`/`PENTESTSWARM_CONFIG`, `--port`, `--ollama-exe`, `--ollama-port` (0 = skip),
-`--redis-port` (0 = skip), `--log-dir`, `--wait` (90 s), `--check-only` (summary JSON on stderr,
-no MCP child). Fixture test: `skills/scripts/test-mcp-pentestswarm-stdio.py` (stub launchers,
+`--redis-port` (default 0 = skip), `--ensure-api-server` (or `PENTESTSWARM_ENSURE_API_SERVER=1`),
+`--log-dir`, `--wait` (90 s), `--check-only` (summary JSON on stderr with `api_server`, `ollama`,
+`redis`, `bind_all_interfaces`; no MCP child). Fixture test: `skills/scripts/test-mcp-pentestswarm-stdio.py` (stub launchers,
 HTTP + stdio fixtures mirroring the quirks above; 10 validation refusals with empty stdout,
-fresh start, reuse, missing-model warning, 3-way concurrency → one `ollama serve` + one
+fresh start with `--ensure-api-server`, reuse, missing-model warning, the default
+Ollama-only chain (no `serve` started), 3-way concurrency → one `ollama serve` + one
 `pentestswarm serve`, wrong owner on either port, early exit, hard-kill + ctrl-break ownership
 under a Codex-style environment with `USERPROFILE`/`APPDATA`/`LOCALAPPDATA`/`PATH` removed,
 `--check-only`). Client startup timeouts apply as for Anything Analyzer: `ollama serve` cold

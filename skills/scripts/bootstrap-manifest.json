@@ -327,7 +327,7 @@
       "canAutoInstall": true,
       "verifyCommand": "pentestswarm",
       "verificationMode": "service-or-registration",
-      "note": "群体智能渗透框架。需要 Go 1.24+ 或 Docker。本仓库只用免费本地组件：provider ollama（无任何 API key；配置 %USERPROFILE%\\.pentestswarm\\config.yaml，模型 llama3.1:8b 需先 ollama pull）。客户端以 stdio 注册 <bridge-python> skills/scripts/mcp/pentestswarm-stdio.py：启动器只读校验 config.yaml（host 127.0.0.1、provider ollama、api_key 空），按需拉起 Memurai/Redis（仅 doctor 需要）、ollama serve（127.0.0.1:11434）与 pentestswarm serve（健康检查 GET http://127.0.0.1:8080/api/v1/health），再在同一 stdio 上 exec pentestswarm mcp serve；不依赖进程环境里的 APPDATA/LOCALAPPDATA/PATH（回退到注册表）。bootstrap 不自动写入此条目，客户端片段见 docs/mcp/host-deviations.md。",
+      "note": "群体智能渗透框架。需要 Go 1.24+ 或 Docker。本仓库只用免费本地组件：provider ollama（无任何 API key；配置 %USERPROFILE%\\.pentestswarm\\config.yaml，模型 llama3.1:8b 需先 ollama pull）。客户端以 stdio 注册 <bridge-python> skills/scripts/mcp/pentestswarm-stdio.py：启动器只读校验 config.yaml（host 127.0.0.1、provider ollama、api_key 空），按需拉起 ollama serve（127.0.0.1:11434，mcp serve 唯一的运行时依赖），再在同一 stdio 上 exec pentestswarm mcp serve；--ensure-api-server（pentestswarm serve，健康检查 GET http://127.0.0.1:8080/api/v1/health）与 --redis-port 6379 只为 doctor 存在；不依赖进程环境里的 APPDATA/LOCALAPPDATA/PATH（回退到注册表）。bootstrap 不自动写入此条目，客户端片段见 docs/mcp/host-deviations.md。",
       "pinnedVersion": "v0.1.0"
     },
     {
