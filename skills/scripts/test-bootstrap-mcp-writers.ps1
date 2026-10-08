@@ -37,7 +37,8 @@ $functionNames = @(
     'ConvertTo-ClaudeMcpServerDefinition', 'Enable-ClaudeMcpJsonServer', 'Register-ClaudeUserMcpServer',
     'ConvertTo-AntigravityMcpServerDefinition', 'Set-AntigravityMcpServer',
     'Ensure-McpServer', 'Get-McpCommandServerDefinition', 'Get-ManifestMcpServerDefinition',
-    'Get-AnythingAnalyzerUserDataPaths', 'Ensure-AnythingAnalyzerMcpConfig'
+    'Get-AnythingAnalyzerUserDataPaths', 'Ensure-AnythingAnalyzerMcpConfig',
+    'Get-ReverseMcpBridgePython', 'Get-AnythingAnalyzerMcpServerDefinition'
 )
 foreach ($name in $functionNames) {
     $functionAst = $ast.Find({
@@ -66,7 +67,7 @@ function Assert-True {
 }
 
 $oldEnv = @{}
-foreach ($key in @('CLAUDE_MCP_CONFIG', 'CLAUDE_SETTINGS_LOCAL', 'CODEX_CONFIG_PATH', 'ANTIGRAVITY_MCP_CONFIG', 'REVERSE_VSWHERE', 'PYTHONPATH', 'REVERSE_IDA_START_FUNCTIONS_ONLY', 'APPDATA')) {
+foreach ($key in @('CLAUDE_MCP_CONFIG', 'CLAUDE_SETTINGS_LOCAL', 'CODEX_CONFIG_PATH', 'ANTIGRAVITY_MCP_CONFIG', 'REVERSE_VSWHERE', 'PYTHONPATH', 'REVERSE_IDA_START_FUNCTIONS_ONLY', 'APPDATA', 'REVERSE_MCP_BRIDGE_PYTHON')) {
     $oldEnv[$key] = [Environment]::GetEnvironmentVariable($key)
 }
 
@@ -83,11 +84,20 @@ try {
     $stdioDefinition = Get-McpCommandServerDefinition -Command 'npx' -Arguments @('-y', '@jshookmcp/jshook@0.3.4') -Env @{ JSHOOK_BASE_PROFILE = 'search' }
     Ensure-McpServer -ServerName 'jshook' -ServerDefinition $stdioDefinition
     Ensure-McpServer -ServerName 'xquik' -ServerDefinition @{ url = 'https://xquik.com/mcp' }
-    Ensure-McpServer -ServerName 'anything-analyzer' -ServerDefinition @{
-        url                  = 'http://localhost:23816/mcp'
-        headers              = @{ Authorization = 'Bearer test-token' }
-        bearer_token_env_var = 'ANYTHING_ANALYZER_MCP_TOKEN'
-    }
+    # anything-analyzer registers as the stdio launcher (manifest mcpBridgeLauncher); the
+    # bearer token must never appear in any client file.
+    $fakeBridgePython = Join-Path $ScratchDir 'bridge\python.exe'
+    New-Item -ItemType Directory -Path (Split-Path $fakeBridgePython) -Force | Out-Null
+    Set-Content -LiteralPath $fakeBridgePython -Value 'fake' -Encoding ascii
+    $env:REVERSE_MCP_BRIDGE_PYTHON = $fakeBridgePython
+    $manifest = Get-Content -LiteralPath (Join-Path $scriptDir 'bootstrap-manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $analyzerEntry = $manifest.capabilities | Where-Object { $_.name -eq 'anything-analyzer' } | Select-Object -First 1
+    Assert-True ($null -ne $analyzerEntry -and $analyzerEntry.mcpBridgeLauncher -like '*anything-analyzer-stdio.py') 'manifest: anything-analyzer carries mcpBridgeLauncher'
+    $analyzerDefinition = Get-AnythingAnalyzerMcpServerDefinition -Definition $analyzerEntry
+    Assert-True ($analyzerDefinition.type -eq 'stdio' -and $analyzerDefinition.command -eq $fakeBridgePython) 'anything-analyzer: stdio definition uses REVERSE_MCP_BRIDGE_PYTHON'
+    Assert-True (@($analyzerDefinition.args).Count -eq 1 -and (Test-Path -LiteralPath $analyzerDefinition.args[0]) -and $analyzerDefinition.args[0] -like '*skills\scripts\mcp\anything-analyzer-stdio.py') 'anything-analyzer: single arg is the existing launcher path'
+    Assert-True (-not $analyzerDefinition.ContainsKey('url') -and -not $analyzerDefinition.ContainsKey('headers') -and -not $analyzerDefinition.ContainsKey('bearer_token_env_var')) 'anything-analyzer: no url/headers/bearer_token_env_var in the definition'
+    Ensure-McpServer -ServerName 'anything-analyzer' -ServerDefinition $analyzerDefinition
     Ensure-McpServer -ServerName 'ida-pro-mcp' -ServerDefinition @{
         type    = 'stdio'
         command = 'C:\Python\python.exe'
@@ -100,9 +110,9 @@ try {
     Assert-True ($claude.mcpServers.jshook.type -eq 'stdio') 'Claude: command server carries "type": "stdio"'
     Assert-True ($claude.mcpServers.jshook.command -eq 'cmd' -and $claude.mcpServers.jshook.args[1] -eq 'npx') 'Claude: npx stays wrapped in cmd /c on Windows'
     Assert-True ($claude.mcpServers.xquik.type -eq 'http' -and $claude.mcpServers.xquik.url -eq 'https://xquik.com/mcp') 'Claude: url server carries "type": "http"'
-    Assert-True ($claude.mcpServers.'anything-analyzer'.type -eq 'http') 'Claude: local http server carries "type": "http"'
-    Assert-True ($claude.mcpServers.'anything-analyzer'.headers.Authorization -eq 'Bearer test-token') 'Claude: headers are preserved'
-    Assert-True (-not $claude.mcpServers.'anything-analyzer'.PSObject.Properties['bearer_token_env_var']) 'Claude: bearer_token_env_var (Codex-only) is stripped'
+    Assert-True ($claude.mcpServers.'anything-analyzer'.type -eq 'stdio' -and $claude.mcpServers.'anything-analyzer'.command -eq $fakeBridgePython) 'Claude: anything-analyzer is a stdio launcher entry'
+    Assert-True ($claude.mcpServers.'anything-analyzer'.args[0] -like '*anything-analyzer-stdio.py' -and -not $claude.mcpServers.'anything-analyzer'.PSObject.Properties['url'] -and -not $claude.mcpServers.'anything-analyzer'.PSObject.Properties['headers']) 'Claude: anything-analyzer has the launcher arg and no url/headers'
+    Assert-True ((Get-Content -LiteralPath $env:CLAUDE_MCP_CONFIG -Raw -Encoding UTF8) -notmatch 'Authorization|ANYTHING_ANALYZER_MCP_TOKEN|23816') 'Claude: no token, header or port leaks into .mcp.json'
     Assert-True ($claude.mcpServers.'ida-pro-mcp'.type -eq 'stdio' -and -not $claude.mcpServers.'ida-pro-mcp'.PSObject.Properties['cwd']) 'Claude: explicit stdio kept, cwd dropped'
     Assert-True ($claude.mcpServers.'ida-pro-mcp'.env.PYTHONUTF8 -eq '1') 'Claude: env map preserved'
 
@@ -145,13 +155,16 @@ try {
     Assert-True ($antigravity.mcpServers.jshook.env.JSHOOK_BASE_PROFILE -eq 'search') 'Antigravity: env preserved'
     Assert-True ($antigravity.mcpServers.xquik.serverUrl -eq 'https://xquik.com/mcp' -and -not $antigravity.mcpServers.xquik.PSObject.Properties['url']) 'Antigravity: url becomes serverUrl'
     Assert-True (-not $antigravity.mcpServers.'ida-pro-mcp'.PSObject.Properties['cwd']) 'Antigravity: cwd dropped'
+    Assert-True ($antigravity.mcpServers.'anything-analyzer'.command -eq $fakeBridgePython -and $antigravity.mcpServers.'anything-analyzer'.args[0] -like '*anything-analyzer-stdio.py' -and -not $antigravity.mcpServers.'anything-analyzer'.PSObject.Properties['serverUrl']) 'Antigravity: anything-analyzer is command/args, no serverUrl'
+    Assert-True ((Get-Content -LiteralPath $env:ANTIGRAVITY_MCP_CONFIG -Raw -Encoding UTF8) -notmatch 'Authorization|ANYTHING_ANALYZER_MCP_TOKEN|23816') 'Antigravity: no token, header or port leaks into mcp_config.json'
 
     # --- 3. Codex writer and quoted-table parsing --------------------------------------
     $codexText = Get-Content -LiteralPath $env:CODEX_CONFIG_PATH -Raw -Encoding UTF8
     Assert-True ($codexText -match '(?m)^\[mcp_servers\.jshook\]\r?$') 'Codex: bare table header for a simple name'
     Assert-True ($codexText -match '(?m)^\[mcp_servers\.ida-pro-mcp\]\r?$') 'Codex: hyphenated name stays a bare key'
     Assert-True ($codexText -notmatch '(?m)^type\s*=') 'Codex: no "type" key is written'
-    Assert-True ($codexText -match '(?m)^bearer_token_env_var = "ANYTHING_ANALYZER_MCP_TOKEN"') 'Codex: bearer_token_env_var kept'
+    Assert-True ($codexText -match '(?m)^\[mcp_servers\.anything-analyzer\]\r?$' -and $codexText -notmatch 'bearer_token_env_var|ANYTHING_ANALYZER_MCP_TOKEN|23816') 'Codex: anything-analyzer is a command table without token, env var name or url'
+    Assert-True ($codexText -match '(?m)^args = \[\s*"[^"]*anything-analyzer-stdio\.py"\s*\]') 'Codex: anything-analyzer args is the launcher'
     Assert-True ($codexText -notmatch 'Authorization') 'Codex: literal headers are not written'
 
     Set-CodexMcpServer -ServerName 'ask-ai.editor' -ServerDefinition @{ command = 'node'; args = @('x.js') }

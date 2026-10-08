@@ -979,6 +979,44 @@ function Ensure-McpServer {
     }
 }
 
+function Get-ReverseMcpBridgePython {
+    # The repo's stdio launchers under skills/scripts/mcp are standard-library only, so any
+    # Python works; REVERSE_MCP_BRIDGE_PYTHON pins the tested bridge interpreter on a host.
+    $override = [string][Environment]::GetEnvironmentVariable('REVERSE_MCP_BRIDGE_PYTHON')
+    if (-not [string]::IsNullOrWhiteSpace($override)) {
+        if (-not (Test-Path -LiteralPath $override -PathType Leaf)) {
+            throw "REVERSE_MCP_BRIDGE_PYTHON points to a missing interpreter: $override"
+        }
+        return (Resolve-Path -LiteralPath $override).Path
+    }
+    $python = Get-FirstCommandPath -Names @('python', 'python3') -PreferApplication
+    if ([string]::IsNullOrWhiteSpace($python)) {
+        throw 'No Python interpreter found for the stdio MCP launcher; set REVERSE_MCP_BRIDGE_PYTHON.'
+    }
+    return $python
+}
+
+function Get-AnythingAnalyzerMcpServerDefinition {
+    param([Parameter(Mandatory = $true)]$Definition)
+
+    # stdio launcher: the client spawns it, it starts/reuses the app and proxies to mcpUrl.
+    # No url, headers or token in the client config; the token stays in the User environment
+    # (ANYTHING_ANALYZER_MCP_TOKEN), which the launcher reads itself.
+    if (-not $Definition.PSObject.Properties['mcpBridgeLauncher'] -or [string]::IsNullOrWhiteSpace([string]$Definition.mcpBridgeLauncher)) {
+        throw 'anything-analyzer manifest entry has no mcpBridgeLauncher.'
+    }
+    $launcher = Resolve-ReversePathTemplate -Value ([string]$Definition.mcpBridgeLauncher)
+    if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) {
+        throw "anything-analyzer stdio launcher not found: $launcher"
+    }
+    return @{
+        type    = 'stdio'
+        command = (Get-ReverseMcpBridgePython)
+        args    = @((Resolve-Path -LiteralPath $launcher).Path)
+        env     = @{}
+    }
+}
+
 function Get-ManifestMcpServerDefinition {
     param([Parameter(Mandatory = $true)]$Definition)
 
@@ -1280,11 +1318,9 @@ function Ensure-Capability {
                 catch {
                     Write-Warning "Could not persist ANYTHING_ANALYZER_MCP_TOKEN for future MCP clients: $($_.Exception.Message)"
                 }
-                $serverDefinition = @{
-                    url                  = $definition.mcpUrl
-                    headers              = @{ Authorization = "Bearer $authToken" }
-                    bearer_token_env_var = 'ANYTHING_ANALYZER_MCP_TOKEN'
-                }
+                # stdio shape: the launcher starts/reuses the app and bridges to mcpUrl; the
+                # token stays in the User environment and never enters a client config.
+                $serverDefinition = Get-AnythingAnalyzerMcpServerDefinition -Definition $definition
                 Ensure-McpServer -ServerName 'anything-analyzer' -ServerDefinition $serverDefinition
                 if ($StartServices) {
                     Start-AnythingAnalyzerService -Definition $definition -AuthToken $authToken

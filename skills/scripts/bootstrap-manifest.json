@@ -156,11 +156,13 @@
         "local-mcp"
       ],
       "mcpUrl": "http://localhost:23816/mcp",
+      "mcpBridgeLauncher": "%SKILL_ROOT%\\scripts\\mcp\\anything-analyzer-stdio.py",
       "servicePort": 23816,
       "docsUrl": "https://github.com/Mouseww/anything-analyzer",
       "canAutoInstall": true,
       "pinnedCommit": "0ed4791688e5186da051c85eb7ddfe4639e14fd2",
-      "verificationMode": "service-or-registration"
+      "verificationMode": "service-or-registration",
+      "note": "客户端以 stdio 注册：<bridge-python> skills/scripts/mcp/anything-analyzer-stdio.py（标准库即可，REVERSE_MCP_BRIDGE_PYTHON 可指定解释器）。启动器按需拉起 pnpm dev（分离进程、命名互斥量）、用 ANYTHING_ANALYZER_MCP_TOKEN 做 initialize 健康检查，再以 pinned mcp-remote 或内置 relay 桥接到 mcpUrl；token 只存在于 User 环境变量，不写入客户端配置。mcpUrl + Bearer 仍可作为手动 HTTP 注册方式（见 docs/mcp/host-deviations.md）。"
     },
     {
       "name": "idapro",
