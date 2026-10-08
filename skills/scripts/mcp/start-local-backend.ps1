@@ -1,25 +1,29 @@
 # Start or reuse a verified local analysis backend. Never opens or executes a target.
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Ida', 'X64dbg', 'AnythingAnalyzer')][string]$Backend,
+    [Parameter(Mandatory)][ValidateSet('Ida', 'X64dbg', 'AnythingAnalyzer', 'PentestSwarm')][string]$Backend,
     [string]$Executable = '',
     [string]$IdaDir = '',
     [string]$RepoDir = '',
     [string]$PnpmPath = '',
     [string]$ConfigPath = '',
+    [string]$OllamaPath = '',
+    [ValidateRange(0,65535)][int]$OllamaPort = 11434,
+    [ValidateRange(0,65535)][int]$RedisPort = 6379,
     [ValidateRange(0,65535)][int]$Port = 0,
     [Parameter(Mandatory)][string]$LogDir,
     [ValidateRange(1,180)][int]$WaitSeconds = 30
 )
 $ErrorActionPreference = 'Stop'
-$Backend = switch ($Backend.ToLowerInvariant()) { 'ida' { 'Ida' } 'x64dbg' { 'X64dbg' } default { 'AnythingAnalyzer' } }
-if ($Backend -ne 'AnythingAnalyzer') {
+$Backend = switch ($Backend.ToLowerInvariant()) { 'ida' { 'Ida' } 'x64dbg' { 'X64dbg' } 'pentestswarm' { 'PentestSwarm' } default { 'AnythingAnalyzer' } }
+if ($Backend -eq 'Ida' -or $Backend -eq 'X64dbg') {
     if ([string]::IsNullOrWhiteSpace($Executable)) { throw "-Executable is required for the $Backend backend." }
     if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) { throw "Executable not found: $Executable" }
     $Executable = (Resolve-Path -LiteralPath $Executable).Path
 }
-if ($Port -eq 0) { $Port = switch ($Backend) { 'Ida' { 13337 } 'X64dbg' { 8888 } default { 23816 } } }
+if ($Port -eq 0) { $Port = switch ($Backend) { 'Ida' { 13337 } 'X64dbg' { 8888 } 'PentestSwarm' { 8080 } default { 23816 } } }
 $script:lastHealthError = ''
+$script:bindAllInterfaces = $false
 
 function Test-BackendPort {
     $client = [Net.Sockets.TcpClient]::new()
@@ -106,6 +110,11 @@ function Get-BackendHealth {
         } elseif ($Backend -eq 'X64dbg') {
             $reply = Invoke-LoopbackJson -Uri "http://127.0.0.1:$Port/Is_Debugging"
             if ($reply.PSObject.Properties.Name -contains 'isDebugging' -and $reply.isDebugging -is [bool]) { return @{is_debugging=$reply.isDebugging} }
+        } elseif ($Backend -eq 'PentestSwarm') {
+            $reply = Invoke-LoopbackJson -Uri "http://127.0.0.1:$Port/api/v1/health"
+            $names = @($reply.PSObject.Properties.Name)
+            if ($names -contains 'service' -and [string]$reply.service -eq 'pentestswarm' -and [string]$reply.status -eq 'ok') { return @{status=[string]$reply.status;service=[string]$reply.service} }
+            $script:lastHealthError = if ($names -contains 'service') { "health answered with service '$($reply.service)' instead of 'pentestswarm'." } else { 'GET /api/v1/health returned no pentestswarm health body.' }
         } else {
             $token = Get-AnythingAnalyzerToken
             if ([string]::IsNullOrWhiteSpace($token)) { $script:lastHealthError = 'ANYTHING_ANALYZER_MCP_TOKEN is not set in the process or User environment.'; return $null }
@@ -135,15 +144,24 @@ function Get-ListenerPid {
     $lines = & netstat.exe -ano -p TCP
     $netstatExit = $LASTEXITCODE
     if ($netstatExit -ne 0) { throw 'Could not verify the backend listener owner.' }
-    $owners = @(); $wildcard = $false
+    $owners = @(); $wildcardOwners = @()
     foreach ($line in $lines) {
         $parts = $line.Trim() -split '\s+'
         if ($parts.Count -ne 5 -or $parts[3] -ne 'LISTENING') { continue }
         if ($parts[1] -eq "127.0.0.1:$Port") { $owners += [int]$parts[4] }
-        elseif ($parts[1] -eq "0.0.0.0:$Port") { $wildcard = $true }
+        elseif ($parts[1] -eq "0.0.0.0:$Port" -or $parts[1] -eq "[::]:$Port") { $wildcardOwners += [int]$parts[4] }
     }
     $owners = @($owners | Select-Object -Unique)
-    if ($owners.Count -eq 0 -and $wildcard) { throw "Port $Port is bound to all interfaces (0.0.0.0), not loopback only; for AnythingAnalyzer set `"host`": `"127.0.0.1`" in mcp-server-config.json and restart the app yourself." }
+    $wildcardOwners = @($wildcardOwners | Select-Object -Unique)
+    if ($owners.Count -eq 0 -and $wildcardOwners.Count -gt 0) {
+        if ($Backend -eq 'PentestSwarm' -and $wildcardOwners.Count -eq 1) {
+            # pentestswarm v0.1.0 ignores server.host (api.Server.Start listens on ":<port>"), so a
+            # wildcard bind is the upstream behaviour, not a misconfiguration; it is reported, not refused.
+            $script:bindAllInterfaces = $true
+            return $wildcardOwners[0]
+        }
+        throw "Port $Port is bound to all interfaces (0.0.0.0), not loopback only; for AnythingAnalyzer set `"host`": `"127.0.0.1`" in mcp-server-config.json and restart the app yourself."
+    }
     if ($owners.Count -ne 1) { throw "Expected one IPv4 loopback listener on port $Port." }
     return $owners[0]
 }
@@ -200,6 +218,141 @@ function Resolve-PnpmLauncher {
     }
     return @{ FilePath = $chosen; Arguments = @('dev'); Resolved = $chosen }
 }
+function Write-LauncherWarning {
+    # stdout carries the JSON result, so every advisory line goes to stderr.
+    param([string]$Message)
+    [Console]::Error.WriteLine("WARNING: $Message")
+}
+function ConvertFrom-SimpleYaml {
+    # Scalars of the indentation-based YAML subset config.example.yaml uses: `key: value` and
+    # `key:` section lines -> hashtable of dotted keys. Lists/flow values are ignored. Mirrors
+    # parse_simple_yaml in pentestswarm-stdio.py.
+    param([string]$Text)
+    $values = @{}
+    $stack = New-Object System.Collections.ArrayList
+    foreach ($raw in ($Text -split "`r?`n")) {
+        $trimmed = $raw.Trim()
+        if (-not $trimmed -or $trimmed.StartsWith('#') -or $trimmed.StartsWith('-')) { continue }
+        $indent = $raw.Length - $raw.TrimStart(' ').Length
+        $match = [regex]::Match($trimmed, '^([A-Za-z0-9_.-]+)\s*:(.*)$')
+        if (-not $match.Success) { continue }
+        $key = $match.Groups[1].Value; $rest = $match.Groups[2].Value.Trim()
+        while ($stack.Count -gt 0 -and $stack[$stack.Count - 1].Indent -ge $indent) { $stack.RemoveAt($stack.Count - 1) }
+        $dotted = (@($stack | ForEach-Object { $_.Key }) + @($key)) -join '.'
+        if ($rest -eq '' -or $rest.StartsWith('#')) { [void]$stack.Add(@{ Indent = $indent; Key = $key }); continue }
+        if ($rest[0] -eq '"' -or $rest[0] -eq "'") {
+            $quote = $rest[0]; $end = $rest.IndexOf($quote, 1)
+            $value = if ($end -gt 0) { $rest.Substring(1, $end - 1) } else { $rest.Substring(1) }
+        } else {
+            $value = ($rest -split '#', 2)[0].Trim()
+            if ($value -eq '{}' -or $value -eq '[]') { [void]$stack.Add(@{ Indent = $indent; Key = $key }); continue }
+        }
+        $values[$dotted] = $value
+    }
+    return $values
+}
+function Test-PentestSwarmConfig {
+    # Read-only validation of config.yaml: loopback host, provider ollama, no API key, model set.
+    param([string]$Path, [int]$ExpectedPort, [int]$ExpectedOllamaPort)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "pentestswarm config not found: $Path. Write it as described in docs/mcp/host-deviations.md (provider ollama, server.host 127.0.0.1)." }
+    $config = ConvertFrom-SimpleYaml -Text ([IO.File]::ReadAllText($Path, [Text.Encoding]::UTF8))
+    $hostValue = if ($config.ContainsKey('server.host')) { $config['server.host'] } else { '<missing>' }
+    if ($hostValue -ne '127.0.0.1') { throw "pentestswarm config server.host is '$hostValue', expected 127.0.0.1: $Path" }
+    $portValue = if ($config.ContainsKey('server.port')) { $config['server.port'] } else { '<missing>' }
+    if ($portValue -ne "$ExpectedPort") { throw "pentestswarm config server.port is '$portValue', expected $ExpectedPort`: $Path" }
+    $provider = if ($config.ContainsKey('orchestrator.provider')) { $config['orchestrator.provider'] } else { '<missing>' }
+    if ($provider -ne 'ollama') { throw "pentestswarm config orchestrator.provider is '$provider', expected ollama (no paid provider): $Path" }
+    if ($config.ContainsKey('orchestrator.api_key') -and $config['orchestrator.api_key']) { throw "pentestswarm config orchestrator.api_key is set; it must stay empty with the ollama provider: $Path" }
+    if (-not $config.ContainsKey('orchestrator.model') -or -not $config['orchestrator.model']) { throw "pentestswarm config orchestrator.model is empty: $Path" }
+    $endpoint = if ($config.ContainsKey('orchestrator.endpoint')) { $config['orchestrator.endpoint'] } else { '' }
+    $endpointMatch = [regex]::Match($endpoint, '^http://(127\.0\.0\.1|localhost)(?::(\d+))?/?$')
+    $expectedOllama = if ($ExpectedOllamaPort -gt 0) { $ExpectedOllamaPort } else { 11434 }
+    if (-not $endpointMatch.Success) { throw "pentestswarm config orchestrator.endpoint is '$(if ($endpoint) { $endpoint } else { '<missing>' })', expected http://127.0.0.1:$expectedOllama`: $Path" }
+    $endpointPort = if ($endpointMatch.Groups[2].Value) { [int]$endpointMatch.Groups[2].Value } else { 80 }
+    if ($ExpectedOllamaPort -gt 0 -and $endpointPort -ne $ExpectedOllamaPort) { throw "pentestswarm config orchestrator.endpoint uses port $endpointPort, expected $ExpectedOllamaPort`: $Path" }
+    return $config
+}
+function Test-LoopbackPort {
+    param([int]$ProbePort)
+    $client = [Net.Sockets.TcpClient]::new()
+    try { $task = $client.ConnectAsync('127.0.0.1', $ProbePort); return ($task.Wait(400) -and $client.Connected) }
+    catch { return $false }
+    finally { $client.Dispose() }
+}
+function Get-OllamaHealth {
+    # GET /api/tags must answer with a models list; reports whether $Model is pulled.
+    param([int]$ProbePort, [string]$Model)
+    $reply = Invoke-LoopbackJson -Uri "http://127.0.0.1:$ProbePort/api/tags"
+    if (-not ($reply.PSObject.Properties.Name -contains 'models')) { throw "GET /api/tags on port $ProbePort returned no Ollama models list." }
+    $names = @($reply.models | ForEach-Object { [string]$_.name })
+    return @{ models = $names.Count; model = $Model; model_present = [bool](($names -contains $Model) -or ($names -contains "$Model`:latest")) }
+}
+function Invoke-WithScrubbedProviderEnv {
+    # Start-Process inherits this process's environment, so provider/API-key variables are removed
+    # around every pentestswarm-related spawn (no paid provider, ever) and the database password is
+    # handed only to `pentestswarm serve`. Mirrors child_environment() in pentestswarm-stdio.py.
+    param([scriptblock]$Body, [switch]$KeepDatabasePassword)
+    $saved = @{}
+    foreach ($entry in (Get-ChildItem Env:)) {
+        $upper = $entry.Name.ToUpperInvariant()
+        $scrub = ($upper -eq 'ANTHROPIC_API_KEY') -or $upper.StartsWith('PENTESTSWARM_ORCHESTRATOR_') -or $upper.StartsWith('PENTESTSWARM_AGENTS_') -or ((-not $KeepDatabasePassword) -and $upper -eq 'PENTESTSWARM_DATABASE_PASSWORD')
+        if ($scrub) { $saved[$entry.Name] = $entry.Value; [Environment]::SetEnvironmentVariable($entry.Name, $null, 'Process') }
+    }
+    try { return (& $Body) }
+    finally { foreach ($name in $saved.Keys) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') } }
+}
+function Ensure-RedisListener {
+    # Warning only: pentestswarm v0.1.0 never opens Redis; `pentestswarm doctor` merely dials the port.
+    param([int]$ProbePort)
+    if ($ProbePort -eq 0) { return 'skipped' }
+    if (Test-LoopbackPort -ProbePort $ProbePort) { return 'listening' }
+    $service = Get-Service -Name 'Memurai' -ErrorAction SilentlyContinue
+    if ($service -and $service.Status -ne 'Running') {
+        try {
+            Start-Service -Name 'Memurai' -ErrorAction Stop
+            for ($i = 0; $i -lt 25; $i++) { if (Test-LoopbackPort -ProbePort $ProbePort) { Write-LauncherWarning "started the Memurai service on 127.0.0.1:$ProbePort"; return 'started' }; Start-Sleep -Milliseconds 200 }
+        } catch { Write-LauncherWarning "could not start the Memurai service: $($_.Exception.Message)" }
+    }
+    Write-LauncherWarning "no Redis-compatible listener on 127.0.0.1:$ProbePort; pentestswarm doctor will flag it (v0.1.0 does not use Redis at runtime)"
+    return 'down'
+}
+function Ensure-OllamaListener {
+    # Reuse a healthy Ollama; start `ollama serve` detached on loopback when the port is closed.
+    param([int]$ProbePort, [string]$Model, [string]$Preferred, [string]$LogDirectory, [string]$Stamp, [int]$Wait)
+    if ($ProbePort -eq 0) { return @{ state = 'skipped' } }
+    if (Test-LoopbackPort -ProbePort $ProbePort) {
+        try { $health = Get-OllamaHealth -ProbePort $ProbePort -Model $Model }
+        catch { throw "Port $ProbePort is occupied but Ollama is unavailable ($($_.Exception.Message)); existing processes were preserved." }
+        if (-not $health.model_present) { Write-LauncherWarning "model '$Model' is not pulled; swarm tool calls will fail until 'ollama pull $Model' runs" }
+        return @{ state = 'reused' } + $health
+    }
+    $ollama = $Preferred
+    if ([string]::IsNullOrWhiteSpace($ollama)) { $ollama = (Get-Command ollama -ErrorAction SilentlyContinue | Select-Object -First 1).Source }
+    if ([string]::IsNullOrWhiteSpace($ollama)) { $ollama = Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama.exe' }
+    if (-not (Test-Path -LiteralPath $ollama -PathType Leaf)) { throw "ollama launcher not found: $ollama (pass -OllamaPath or install Ollama)." }
+    New-Item -ItemType Directory -Force -Path $LogDirectory | Out-Null
+    $savedHost = $env:OLLAMA_HOST
+    $env:OLLAMA_HOST = "127.0.0.1:$ProbePort"
+    try {
+        $process = Invoke-WithScrubbedProviderEnv -Body { Start-Process -FilePath $ollama -ArgumentList @('serve') -WorkingDirectory $LogDirectory -WindowStyle Hidden -RedirectStandardOutput (Join-Path $LogDirectory "Ollama-$Stamp.stdout.log") -RedirectStandardError (Join-Path $LogDirectory "Ollama-$Stamp.stderr.log") -PassThru }
+    } finally { $env:OLLAMA_HOST = $savedHost }
+    $null = $process.Handle
+    @{backend='Ollama';pid=$process.Id;port=$ProbePort;executable=$ollama;started_at=(Get-Date -Format o)} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $LogDirectory "Ollama-$Stamp.process.json") -Encoding utf8
+    $deadline = (Get-Date).AddSeconds($Wait)
+    do {
+        $process.Refresh()
+        if ($process.HasExited) { throw "ollama serve exited with code $($process.ExitCode) before readiness; inspect $LogDirectory." }
+        if (Test-LoopbackPort -ProbePort $ProbePort) {
+            try { $health = Get-OllamaHealth -ProbePort $ProbePort -Model $Model } catch { $health = $null }
+            if ($health) {
+                if (-not $health.model_present) { Write-LauncherWarning "model '$Model' is not pulled; swarm tool calls will fail until 'ollama pull $Model' runs" }
+                return @{ state = 'started'; pid = $process.Id } + $health
+            }
+        }
+        Start-Sleep -Milliseconds 400
+    } while ((Get-Date) -lt $deadline)
+    throw "ollama serve did not become ready on loopback port $ProbePort. PID $($process.Id) was preserved; inspect $LogDirectory."
+}
 
 $scriptClock = [Diagnostics.Stopwatch]::StartNew()
 $startupMutex = [Threading.Mutex]::new($false, "Local\reverse-skill-$Backend-$Port")
@@ -209,13 +362,33 @@ try {
     catch [Threading.AbandonedMutexException] { $lockAcquired = $true }
     if (-not $lockAcquired) { throw "Another $Backend startup still owns port $Port; retry after it finishes." }
 
+$dependencies = @{}
+if ($Backend -eq 'PentestSwarm') {
+    # Validate before anything is started or created; the stamp is shared by every log name.
+    if ([string]::IsNullOrWhiteSpace($ConfigPath)) { $ConfigPath = Join-Path $env:USERPROFILE '.pentestswarm\config.yaml' }
+    $swarmConfig = Test-PentestSwarmConfig -Path $ConfigPath -ExpectedPort $Port -ExpectedOllamaPort $OllamaPort
+    if ([string]::IsNullOrWhiteSpace($Executable)) { $Executable = (Get-Command pentestswarm -ErrorAction SilentlyContinue | Select-Object -First 1).Source }
+    if ([string]::IsNullOrWhiteSpace($Executable)) { $Executable = Join-Path $env:USERPROFILE 'go\bin\pentestswarm.exe' }
+    if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) { throw "pentestswarm executable not found: $Executable (pass -Executable or go install it)." }
+    $Executable = (Resolve-Path -LiteralPath $Executable).Path
+    $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
+    $dependencyStamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
+    $dependencies['redis'] = Ensure-RedisListener -ProbePort $RedisPort
+    $dependencies['ollama'] = Ensure-OllamaListener -ProbePort $OllamaPort -Model $swarmConfig['orchestrator.model'] -Preferred $OllamaPath -LogDirectory $LogDir -Stamp $dependencyStamp -Wait $WaitSeconds
+}
 if (Test-BackendPort) {
     $health = Get-BackendHealth
     if (-not $health) {
         $detail = if ($script:lastHealthError) { " ($script:lastHealthError)" } else { '' }
         throw "Port $Port is occupied but the expected $Backend API is unavailable or busy$detail; existing processes were preserved."
     }
-    @{backend=$Backend;pid=(Get-ListenerPid);port=$Port;reused=$true;health=$health;elapsed_ms=$scriptClock.ElapsedMilliseconds} | ConvertTo-Json -Depth 4
+    $owner = Get-ListenerPid
+    $result = @{backend=$Backend;pid=$owner;port=$Port;reused=$true;health=$health;elapsed_ms=$scriptClock.ElapsedMilliseconds}
+    if ($Backend -eq 'PentestSwarm') {
+        $result['dependencies'] = $dependencies; $result['bind_all_interfaces'] = $script:bindAllInterfaces
+        if ($script:bindAllInterfaces) { Write-LauncherWarning "pentestswarm serve listens on all interfaces (upstream v0.1.0 ignores server.host); see docs/mcp/host-deviations.md" }
+    }
+    $result | ConvertTo-Json -Depth 4
     exit 0
 }
 if ($Backend -eq 'AnythingAnalyzer') {
@@ -244,6 +417,15 @@ if ($Backend -eq 'Ida') {
     # Port selects the probe address; configure a non-default port in the plugin itself.
     $process = Start-Process -FilePath $Executable -WorkingDirectory (Split-Path $Executable -Parent) -WindowStyle Hidden -PassThru
     $record = @{backend=$Backend;pid=$process.Id;port=$Port;executable=$Executable;started_at=(Get-Date -Format o);sample_opened=$false}
+} elseif ($Backend -eq 'PentestSwarm') {
+    # `pentestswarm serve --config <path>`: the API server for doctor/campaign commands. The
+    # database password reaches the child only through its environment (User scope fallback).
+    $savedDbPassword = $env:PENTESTSWARM_DATABASE_PASSWORD
+    if ([string]::IsNullOrWhiteSpace($savedDbPassword)) { $env:PENTESTSWARM_DATABASE_PASSWORD = [Environment]::GetEnvironmentVariable('PENTESTSWARM_DATABASE_PASSWORD', 'User') }
+    try {
+        $process = Invoke-WithScrubbedProviderEnv -KeepDatabasePassword -Body { Start-Process -FilePath $Executable -ArgumentList @('serve', '--config', $ConfigPath, '--port', "$Port") -WorkingDirectory $LogDir -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru }
+    } finally { $env:PENTESTSWARM_DATABASE_PASSWORD = $savedDbPassword }
+    $record = @{backend=$Backend;pid=$process.Id;port=$Port;executable=$Executable;config_path=$ConfigPath;started_at=(Get-Date -Format o);sample_opened=$false}
 } else {
     # `pnpm dev` runs electron-vite dev; the Electron window is the service and the MCP listener.
     $process = Start-Process -FilePath $launcher.FilePath -ArgumentList $launcher.Arguments -WorkingDirectory $RepoDir -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
@@ -259,7 +441,12 @@ do {
     if ($health) {
         $owner = Get-ListenerPid
         if (-not (Test-StartedProcessOwner -Owner $owner -Launcher $process.Id)) { throw "Port $Port is owned by a different process; startup was not confirmed." }
-        @{backend=$Backend;pid=$owner;launcher_pid=$process.Id;port=$Port;reused=$false;health=$health;log_dir=$LogDir;elapsed_ms=$scriptClock.ElapsedMilliseconds} | ConvertTo-Json -Depth 4
+        $result = @{backend=$Backend;pid=$owner;launcher_pid=$process.Id;port=$Port;reused=$false;health=$health;log_dir=$LogDir;elapsed_ms=$scriptClock.ElapsedMilliseconds}
+        if ($Backend -eq 'PentestSwarm') {
+            $result['dependencies'] = $dependencies; $result['bind_all_interfaces'] = $script:bindAllInterfaces
+            if ($script:bindAllInterfaces) { Write-LauncherWarning "pentestswarm serve listens on all interfaces (upstream v0.1.0 ignores server.host); see docs/mcp/host-deviations.md" }
+        }
+        $result | ConvertTo-Json -Depth 4
         exit 0
     }
     Start-Sleep -Milliseconds 400
