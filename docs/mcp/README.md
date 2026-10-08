@@ -51,18 +51,30 @@ is not automatically a Streamable HTTP MCP endpoint.
 | IDA GUI | Open IDA and start its installed MCP plugin | The proxy only; plugin initialization may only register a hotkey |
 | GhydraMCP | Open an enabled CodeBrowser tool and a project/program, then verify instance discovery | The Python bridge and its local discovery loop |
 | x64dbg | Launch the debugger with the installed matching `.dp64`/`.dp32` plugin; an empty debugger is sufficient for a health check | The Python bridge only |
+| Anything Analyzer | `start-local-backend.ps1 -Backend AnythingAnalyzer` validates `mcp-server-config.json`, runs `pnpm dev` in the pinned checkout and waits for an authenticated `initialize` on `127.0.0.1:23816/mcp` | Nothing: the client entry is a plain HTTP URL, so Claude Code and Codex report connection refused until the app runs |
 | math | No separate GUI/backend | The complete MCP server |
 
 The agent should perform startup and verification when authorized, rather than
 ask the user to copy tutorial commands. GUI applications or licenses that
 actually require a human decision are reported with their precise blocker.
 
-For the currently supported IDA headless and x64dbg entrypoints, use
+For the currently supported IDA headless, x64dbg and Anything Analyzer
+entrypoints, use
 [`start-local-backend.ps1`](../../skills/scripts/mcp/start-local-backend.ps1).
 It accepts resolved executable paths, probes the real API, reuses a healthy
 backend, records a newly started PID, and starts without a target. It never
 kills an existing process or adds a login task. An occupied but unresponsive
 port is a reason to inspect the existing backend, not replace it blindly.
+`-Backend AnythingAnalyzer` takes `-RepoDir` (default
+`%USERPROFILE%\Tools\anything-analyzer`), `-PnpmPath` (default: pnpm from
+PATH, `.exe` before `.cmd` before `.ps1`), `-ConfigPath` (default
+`%APPDATA%\anything-analyzer\mcp-server-config.json`) and `-Port` (23816).
+Its health probe is a Streamable HTTP `initialize` with
+`Authorization: Bearer $ANYTHING_ANALYZER_MCP_TOKEN` that must return
+`serverInfo.name` `anything-analyzer`; a 401 or a different server name is
+reported as the reason the occupied port was refused. The runbook, the host
+evidence and the known upstream limitation are in
+[host-deviations.md](host-deviations.md).
 
 For an existing authorized Ghidra project, use
 [`start-ghidra-project.ps1`](../../skills/scripts/mcp/start-ghidra-project.ps1)

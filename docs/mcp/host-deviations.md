@@ -117,11 +117,50 @@ Verified working `%APPDATA%\anything-analyzer\mcp-server-config.json` (no BOM):
 {"enabled":true,"host":"127.0.0.1","port":23816,"authEnabled":true,"authToken":"<token>"}
 ```
 
-Start it with `pnpm dev` from `%USERPROFILE%\Tools\anything-analyzer`; the Electron window
-**is** the service and dies at logoff. After a restart the listener is `127.0.0.1:23816` only:
-`initialize` with `Authorization: Bearer <token>` returns 200 and `serverInfo`
-`anything-analyzer`, without the header it returns 401. The bearer token lives in the User
-environment variable `ANYTHING_ANALYZER_MCP_TOKEN`, which the bootstrap sets from the same file.
+The Electron window **is** the service and dies at logoff. After a restart the listener is
+`127.0.0.1:23816` only: `initialize` with `Authorization: Bearer <token>` returns 200 and
+`serverInfo` `anything-analyzer`, without the header it returns 401. The bearer token lives
+in the User environment variable `ANYTHING_ANALYZER_MCP_TOKEN`, which the bootstrap sets from
+the same file.
+
+Agent-controlled start (same contract as the IDA and x64dbg entrypoints: reuse a healthy
+listener, never kill anything, record the PID, loopback check):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File skills\scripts\mcp\start-local-backend.ps1 `
+  -Backend AnythingAnalyzer -LogDir "$env:LOCALAPPDATA\reverse-skill\anything-analyzer" -WaitSeconds 90
+```
+
+Defaults: `-RepoDir %USERPROFILE%\Tools\anything-analyzer`, `-Port 23816`, `-ConfigPath
+%APPDATA%\anything-analyzer\mcp-server-config.json`, pnpm resolved from PATH (`.exe`, then
+`.cmd`, then the `.ps1` shim wrapped in the current host). Before `pnpm dev` is started the
+script validates the app config read-only and fails with a precise message when the file is
+missing, carries a UTF-8 BOM, is not JSON, has `enabled != true`, `host != 127.0.0.1`, a
+different `port`, `authEnabled != true`, an empty `authToken`, or an `authToken` that differs
+from `ANYTHING_ANALYZER_MCP_TOKEN` (clients would get 401). It never rewrites the token. The
+health probe is a Streamable HTTP `initialize` (`Accept: application/json, text/event-stream`,
+SSE reply parsed) that must answer `serverInfo.name` `anything-analyzer`; an occupied port
+whose listener answers 401 or another server name is refused with that reason and left
+running. `pnpm dev` runs hidden with stdout/stderr under `-LogDir` next to the
+`AnythingAnalyzer-<stamp>.process.json` record (`pid` is the `pnpm` launcher, `executable`
+the resolved pnpm path, `repo_dir`, `config_path`). `electron-vite dev` builds in about 1 s on
+this host and the listener line `[MCP Server] Listening on http://127.0.0.1:23816/mcp`
+followed a few seconds later; `-WaitSeconds` accepts up to 180 for cold caches.
+Fixture test: `skills/scripts/test-mcp-anything-analyzer-start.ps1` (stub `pnpm.cmd` +
+Python HTTP fixture; passes under Windows PowerShell 5.1 and pwsh 7; never touches the real
+app, config or token).
+
+Known upstream limitation (pinned `0ed4791`, v3.6.60, **not patched** in the checkout):
+`src/main/mcp/mcp-server.ts:167-173` sets `transport.onclose` to call `srv.close()`, and
+`McpServer.close()` closes the same transport, which fires `onclose` again. Every client
+disconnect (a `DELETE /mcp` session close, a dropped connection, a client restart) therefore
+ends in `RangeError: Maximum call stack size exceeded`, logged as
+`Exception in PromiseRejectCallback` from `@modelcontextprotocol/sdk` `webStandardStreamableHttp.js`
+in `anything-analyzer-dev.err.log` (68 such entries on this host after the 2026-10-08 run).
+The session maps are cleared before the recursion, so the server keeps serving; the entries
+are noise, not a crash. The launcher's health probe closes its own `initialize` session with
+a `DELETE`, so expect one more entry per launcher run. Fix it upstream or in a fork patch under
+`docs/mcp/patches/`; do not edit the pinned checkout in place.
 
 ### x64dbg
 

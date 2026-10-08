@@ -20,7 +20,7 @@
 | iOS / IPA 应用 | `mobile-reverse/SKILL.md` — iOS 逆向 + Frida/Objection | `mobile-reverse/references/ios-reverse-guide.md` — iOS 专项 |
 | 二进制 exe/dll/so/elf | `ida-reverse/` — IDA Pro 反编译 | `radare2/` — CLI 分析，或 `reverse-engineering/tools.md` — GDB/Unicorn |
 | JavaScript / Web 前端 | `js-reverse/` — 5 阶段工作流 | anything-analyzer MCP 的浏览器工具，或 jshookmcp 的浏览器/CDP/Hook 能力 |
-| HTTP 抓包 / 浏览器采样 / 请求重放 | anything-analyzer MCP（23816） | Reqable MCP、`js-reverse/`、jshookmcp 或 `competition-web-runtime/` |
+| HTTP 抓包 / 浏览器采样 / 请求重放 | anything-analyzer MCP（23816）— ACTION REQUIRED: start the backend via `skills/scripts/mcp/start-local-backend.ps1 -Backend AnythingAnalyzer` before using anything-analyzer tools | Reqable MCP、`js-reverse/`、jshookmcp 或 `competition-web-runtime/` |
 | 固件 / IoT | `firmware-pentest/` — OWASP FSTM 全链路：提取→仿真→fuzz→利用 | `reverse-engineering/platforms.md` — 仅静态 RE / `reverse-engineering/tools.md` — Ghidra headless |
 | Binary Ninja / Binja | `binary-ninja-reverse/` — HLIL/MLIL/LLIL + Python API | 显式启用社区 MCP/本机 HTTP 适配器 |
 | WASM / Python 字节码 / .NET | `reverse-engineering/languages.md` | 按具体语言查对应章节 |
@@ -224,7 +224,7 @@
 | Python 3 标准库 | `case-review/`: 只读 case Evidence 图审查 |
 | angr / Qiling / Unicorn | `reverse-engineering/tools-dynamic.md` |
 | BinDiff / Diaphora | `reverse-engineering/tools-advanced.md` |
-| anything-analyzer MCP | 端口 23816 的 MCP 服务器（浏览器+HTTP 捕获+AI 分析） |
+| anything-analyzer MCP | 端口 23816 的 MCP 服务器（浏览器+HTTP 捕获+AI 分析）；客户端配置只是一个 URL，不会拉起应用，ACTION REQUIRED: start the backend via `skills/scripts/mcp/start-local-backend.ps1 -Backend AnythingAnalyzer` before using anything-analyzer tools |
 | jshookmcp | `js-reverse/` 的补强 MCP 面，适合浏览器/CDP/Hook/Network/SourceMap/AST 场景；需要先下载并在 MCP 客户端里启用 |
 | agent-browser / Playwright | `browser-automation/` — 浏览器自动化（打开、点击、填表、爬取、截图） |
 | OpenReverse (UIA/CUA) | `browser-automation/` — Windows 桌面应用自动化 + 网络观察（mitmproxy） |

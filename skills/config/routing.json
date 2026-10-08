@@ -30,7 +30,7 @@
       "label": "JS / frontend reverse",
       "skill": "js-reverse/SKILL.md",
       "keywords": [
-        { "must": "js.?reverse|webpack|cryptojs|frontend.?sign|jshook|cdp|encrypted.?param|前端.?签名|js.?逆向|加密.?参数|webpack.?逆向|抓包|http.?capture|请求.?重放|request.?replay|js.?加密|js.?解密|前端.?加密", "note": "抓包/HTTP 捕获/请求重放 属 JS 前端链路 (anything-analyzer)" }
+        { "must": "js.?reverse|webpack|cryptojs|frontend.?sign|jshook|cdp|encrypted.?param|前端.?签名|js.?逆向|加密.?参数|webpack.?逆向|抓包|http.?capture|请求.?重放|request.?replay|js.?加密|js.?解密|前端.?加密", "note": "抓包/HTTP 捕获/请求重放 属 JS 前端链路 (anything-analyzer); ACTION REQUIRED: start the backend via skills/scripts/mcp/start-local-backend.ps1 -Backend AnythingAnalyzer before using anything-analyzer tools" }
       ]
     },
     "R4": {

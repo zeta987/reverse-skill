@@ -22,7 +22,7 @@ Route tasks to the most appropriate skill module by target type, user intent, an
 | APK / Android app | `apk-reverse/` — jadx decompile + apktool unpack | Optional licensed JEB Pro cross-check; if core is in .so → `ida-reverse/` or `radare2/` |
 | Binary exe/dll/so/elf | `ida-reverse/` — IDA Pro decompile | `radare2/` — CLI analysis, or `reverse-engineering/tools.md` — GDB/Unicorn |
 | JavaScript / Web frontend | `js-reverse/` — 5-stage workflow | anything-analyzer MCP browser tools, or jshookmcp CDP/Hook |
-| HTTP capture / browser sampling / request replay | anything-analyzer MCP (23816) | Reqable MCP, `js-reverse/`, jshookmcp, or `competition-web-runtime/` |
+| HTTP capture / browser sampling / request replay | anything-analyzer MCP (23816) — ACTION REQUIRED: start the backend via `skills/scripts/mcp/start-local-backend.ps1 -Backend AnythingAnalyzer` before using anything-analyzer tools | Reqable MCP, `js-reverse/`, jshookmcp, or `competition-web-runtime/` |
 | Firmware / IoT | `firmware-pentest/` — extract → EMBA → emulate → fuzz | `reverse-engineering/platforms.md` — static RE only |
 | WASM / Python bytecode / .NET / **DSL VM / 自定义虚拟机** | `reverse-engineering/dsl-vm-reverse/SKILL.md` — IIFE + switch-case opcode JS VM | `reverse-engineering/languages.md` — real WASM binaries |
 | Malware / virus sample | `malware-analysis/SKILL.md` — six-stage + YARA/Sigma | `ida-reverse/` deep dive |
@@ -234,7 +234,7 @@ Do NOT force the user to repeatedly confirm "this is CTF/local." Carry the CTF/l
 | deflat (QuarksLab) / angr symbol | `reverse-engineering/references/ollvm-deobfuscation.md` — 控制流平坦化去除 |
 | GOOMBA (Ghidra) | `reverse-engineering/references/ollvm-deobfuscation.md` — Ghidra P-Code 反混淆 |
 | BinDiff / Diaphora | `reverse-engineering/tools-advanced.md` |
-| anything-analyzer MCP | Port 23816 MCP server (browser + HTTP capture + AI analysis) |
+| anything-analyzer MCP | Port 23816 MCP server (browser + HTTP capture + AI analysis); the client entry is a bare URL, so ACTION REQUIRED: start the backend via `skills/scripts/mcp/start-local-backend.ps1 -Backend AnythingAnalyzer` before using anything-analyzer tools |
 | jshookmcp | `js-reverse/` enhancement MCP for browser/CDP/Hook/Network/SourceMap/AST |
 | agent-browser / Playwright | `browser-automation/` — browser automation |
 | OpenReverse (UIA/CUA) | `browser-automation/` — Windows desktop automation |

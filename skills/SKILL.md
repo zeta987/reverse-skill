@@ -132,7 +132,7 @@ description: Routes reverse engineering, exploitation, penetration testing, malw
 
 ## 关联资源
 
-- 本机还有 **anything-analyzer**（端口 23816）MCP 服务器，提供浏览器自动化、HTTP 捕获和 AI 分析能力
+- 本机还有 **anything-analyzer**（端口 23816）MCP 服务器，提供浏览器自动化、HTTP 捕获和 AI 分析能力；客户端配置不会拉起它，ACTION REQUIRED: start the backend via `skills/scripts/mcp/start-local-backend.ps1 -Backend AnythingAnalyzer` before using anything-analyzer tools
 - `tool-index.md` 记录本机逆向工具是否可用、实际路径、版本和脚本引用
 - 包根目录下的 `Readme.md` 提供面向 Claude Code、Codex CLI 与其他代码 AI 客户端的通用安装与接入说明
 

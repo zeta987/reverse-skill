@@ -164,7 +164,7 @@ description: 在使用 js-reverse-mcp 做前端 JavaScript 逆向时使用，适
 
 **上游入口**: `skills/SKILL.md`（总控）、`routing.md`
 **上游备选**:
-- anything-analyzer MCP（端口 23816）的浏览器工具可作为替代或补充
+- anything-analyzer MCP（端口 23816）的浏览器工具可作为替代或补充。ACTION REQUIRED: start the backend via `skills/scripts/mcp/start-local-backend.ps1 -Backend AnythingAnalyzer` before using anything-analyzer tools（客户端里的 HTTP URL 不会拉起应用，脚本会复用健康实例、校验 `mcp-server-config.json`、拒绝被其他进程占用的端口）
 - jshookmcp 可作为更强的浏览器/CDP/Hook/Network/SourceMap/AST 执行面
 - `reverse-engineering/SKILL.md`（如果目标不是前端 JS）
 
@@ -198,6 +198,9 @@ powershell -File "<skill-root>\scripts\bootstrap-reverse.ps1" -Capability @('jsh
 
 # 注册并启动 anything-analyzer
 powershell -File "<skill-root>\scripts\bootstrap-reverse.ps1" -Capability @('anything-analyzer') -StartServices -McpHostTarget Codex
+
+# 已安装后，每次需要 anything-analyzer 工具前按需拉起 / 复用后端（不会杀进程，端口被别的进程占用时拒绝）
+powershell -NoProfile -ExecutionPolicy Bypass -File "<skill-root>\scripts\mcp\start-local-backend.ps1" -Backend AnythingAnalyzer -LogDir "$env:LOCALAPPDATA\reverse-skill\anything-analyzer" -WaitSeconds 90
 ```
 
 ### 注意事项
