@@ -271,7 +271,7 @@
 | 服务 | 端口 | 用途 | 启动方式 |
 |------|------|------|---------|
 | idapro | 13337-13350 | IDA Pro 72 个逆向工具 | 自动启动（IDA 插件），多实例端口递增 |
-| anything-analyzer | 23816 | 浏览器自动化 + HTTP 捕获 | `skills/scripts/mcp/start-local-backend.ps1 -Backend AnythingAnalyzer -LogDir <dir>`（校验 `mcp-server-config.json`、复用健康实例、在项目目录跑 `pnpm dev`；客户端里的 URL 本身不会拉起应用） |
+| anything-analyzer | 23816 | 浏览器自动化 + HTTP 捕获 | 客户端注册 stdio 启动器 `<bridge-python> skills/scripts/mcp/anything-analyzer-stdio.py`，客户端启动时自动拉起/复用应用并代理到 HTTP 端点；不带代理的手动启动：`skills/scripts/mcp/start-local-backend.ps1 -Backend AnythingAnalyzer -LogDir <dir>`（两者都校验 `mcp-server-config.json`、从不杀进程、在项目目录跑 `pnpm dev`） |
 | jshookmcp | — | JS Hook/CDP/Network/AST | `npx -y @jshookmcp/jshook@0.3.4`（stdio） |
 | Ghidra-mcp | 8192 起（REST） | Ghidra 免费反编译（GhydraMCP 用户扩展） | CodeBrowser 启用插件；客户端经 stdio 桥接 `skills/scripts/mcp/ghydra-stdio.py --bridge <bridge_mcp_hydra.py>`（见 `docs/mcp/README.md`） |
 | burpsuite | 9876（HTTP API） | BurpSuite 78 工具全控制（Proxy/Intruder/Repeater/Scanner/Collaborator） | Burp 加载 `burp-mcp-full.jar`；客户端经 stdio 桥接 `node burp-mcp-full/mcp-bridge.js` |

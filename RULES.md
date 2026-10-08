@@ -202,7 +202,7 @@ After task completion (vulnerability verified / reverse complete / flag captured
 | Service | Port | Purpose | Startup |
 |---------|------|---------|---------|
 | idapro | 13337-13350 | IDA Pro 72 reverse tools | Auto-start (IDA plugin), port increments per instance |
-| anything-analyzer | 23816 | Browser automation + HTTP capture | `skills/scripts/mcp/start-local-backend.ps1 -Backend AnythingAnalyzer -LogDir <dir>` (validates `mcp-server-config.json`, reuses a healthy listener, runs `pnpm dev` in the checkout; the client URL alone starts nothing) |
+| anything-analyzer | 23816 | Browser automation + HTTP capture | Clients register the stdio launcher `<bridge-python> skills/scripts/mcp/anything-analyzer-stdio.py`, which starts/reuses the app and proxies to the HTTP endpoint on client start; manual start without a proxy: `skills/scripts/mcp/start-local-backend.ps1 -Backend AnythingAnalyzer -LogDir <dir>` (both validate `mcp-server-config.json`, never kill, run `pnpm dev` in the checkout) |
 | jshookmcp | — | JS Hook/CDP/Network/AST | `npx -y @jshookmcp/jshook@0.3.4` (stdio) |
 | Ghidra-mcp | 8192+ (REST) | Ghidra free decompiler via GhydraMCP user extension | CodeBrowser with the plugin enabled; clients use the stdio bridge `skills/scripts/mcp/ghydra-stdio.py --bridge <bridge_mcp_hydra.py>` (see `docs/mcp/README.md`) |
 | burpsuite | 9876 (HTTP API) | BurpSuite 78-tool full control (Proxy/Intruder/Repeater/Scanner/Collaborator) | Burp loads `burp-mcp-full.jar`; clients use the stdio bridge `node burp-mcp-full/mcp-bridge.js` |

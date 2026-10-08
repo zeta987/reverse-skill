@@ -19,6 +19,7 @@ start an analysis backend or supply a license.
 | `Ghidra-mcp` | Tested bridge Python + the verified GhydraMCP stdio launcher | `GHIDRA_HYDRA_HOST=127.0.0.1`; no positional 13337 URL |
 | `x64dbg-mcp` | Tested bridge Python + repo `skills/scripts/mcp/x64dbg-stdio.py --bridge <installed-x64dbg.py>` | `X64DBG_URL=http://127.0.0.1:8888/` |
 | `math-mcp` | Existing Node + `math-mcp/build/index.js` | None required |
+| `anything-analyzer` | Tested bridge Python + repo `skills/scripts/mcp/anything-analyzer-stdio.py` (starts/reuses the app, then proxies to `127.0.0.1:23816/mcp`) | `env_vars = ["ANYTHING_ANALYZER_MCP_TOKEN"]`, `startup_timeout_sec = 120`; no url or header (see `host-deviations.md`) |
 
 Resolve each path from the current installation. The same backend should have
 one chosen alias per client; avoid registering both `idapro` and `ida-pro-mcp`

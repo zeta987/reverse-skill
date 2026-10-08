@@ -164,7 +164,7 @@ description: 在使用 js-reverse-mcp 做前端 JavaScript 逆向时使用，适
 
 **上游入口**: `skills/SKILL.md`（总控）、`routing.md`
 **上游备选**:
-- anything-analyzer MCP（端口 23816）的浏览器工具可作为替代或补充。ACTION REQUIRED: start the backend via `skills/scripts/mcp/start-local-backend.ps1 -Backend AnythingAnalyzer` before using anything-analyzer tools（客户端里的 HTTP URL 不会拉起应用，脚本会复用健康实例、校验 `mcp-server-config.json`、拒绝被其他进程占用的端口）
+- anything-analyzer MCP（端口 23816）的浏览器工具可作为替代或补充。ACTION REQUIRED: start the backend via `skills/scripts/mcp/start-local-backend.ps1 -Backend AnythingAnalyzer` before using anything-analyzer tools（客户端若已按 `docs/mcp/host-deviations.md` 注册为 stdio 启动器 `anything-analyzer-stdio.py`，客户端启动时会自动拉起/复用应用，此步可省；两条路径都校验 `mcp-server-config.json`、复用健康实例、拒绝被其他进程占用的端口，从不杀进程）
 - jshookmcp 可作为更强的浏览器/CDP/Hook/Network/SourceMap/AST 执行面
 - `reverse-engineering/SKILL.md`（如果目标不是前端 JS）
 

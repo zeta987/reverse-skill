@@ -51,7 +51,7 @@ is not automatically a Streamable HTTP MCP endpoint.
 | IDA GUI | Open IDA and start its installed MCP plugin | The proxy only; plugin initialization may only register a hotkey |
 | GhydraMCP | Open an enabled CodeBrowser tool and a project/program, then verify instance discovery | The Python bridge and its local discovery loop |
 | x64dbg | Launch the debugger with the installed matching `.dp64`/`.dp32` plugin; an empty debugger is sufficient for a health check | The Python bridge only |
-| Anything Analyzer | `start-local-backend.ps1 -Backend AnythingAnalyzer` validates `mcp-server-config.json`, runs `pnpm dev` in the pinned checkout and waits for an authenticated `initialize` on `127.0.0.1:23816/mcp` | Nothing: the client entry is a plain HTTP URL, so Claude Code and Codex report connection refused until the app runs |
+| Anything Analyzer | Registered as the stdio launcher `anything-analyzer-stdio.py`: the client spawns it, it validates `mcp-server-config.json`, runs `pnpm dev` detached in the pinned checkout, waits for an authenticated `initialize` on `127.0.0.1:23816/mcp` and then proxies stdio to it (pinned `mcp-remote`, or its built-in relay). `start-local-backend.ps1 -Backend AnythingAnalyzer` is the same start without a proxy | With the stdio shape: the app itself, on demand. With the manual HTTP+Bearer shape: nothing, the client reports connection refused until the app runs |
 | math | No separate GUI/backend | The complete MCP server |
 
 The agent should perform startup and verification when authorized, rather than
@@ -73,7 +73,12 @@ resort), `-ConfigPath` (default
 Its health probe is a Streamable HTTP `initialize` with
 `Authorization: Bearer $ANYTHING_ANALYZER_MCP_TOKEN` that must return
 `serverInfo.name` `anything-analyzer`; a 401 or a different server name is
-reported as the reason the occupied port was refused. The runbook, the host
+reported as the reason the occupied port was refused. For the clients themselves
+the registered entry is the stdio launcher
+[`anything-analyzer-stdio.py`](../../skills/scripts/mcp/anything-analyzer-stdio.py)
+(standard-library Python; same validation, same named mutex, detached `pnpm dev`,
+then a `mcp-remote` or built-in relay proxy leg), so a client start brings the
+app up without a manual step. The runbook, the four client shapes, the host
 evidence and the known upstream limitation are in
 [host-deviations.md](host-deviations.md).
 

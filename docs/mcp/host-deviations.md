@@ -47,10 +47,10 @@ this machine's absolute paths.
 
 | Client | File | Servers |
 |---|---|---|
-| Codex CLI | `.codex/config.toml` (project scope, repo is trusted) | ida-pro-mcp, Ghidra-mcp, x64dbg-mcp, math-mcp, r2mcp, jshook, xquik |
-| Claude Code | `.mcp.json` + `.claude/settings.local.json` (`enabledMcpjsonServers`) | same seven; every stdio entry carries `"type": "stdio"` |
-| Antigravity | `.agents/mcp_config.json` (`mcpServers`, no `cwd` field) | same seven; `xquik` as `serverUrl` |
-| dsh web | `.dsh/agent-presets/reverse-skill/agent.cordis.yml` | ida-pro, ghidra, x64dbg, math, r2, jshook (xquik not added: http transport unverified) |
+| Codex CLI | `.codex/config.toml` (project scope, repo is trusted) | ida-pro-mcp, Ghidra-mcp, x64dbg-mcp, math-mcp, r2mcp, jshook, xquik, anything-analyzer (stdio launcher, see below) |
+| Claude Code | `.mcp.json` + `.claude/settings.local.json` (`enabledMcpjsonServers`) | same eight; every stdio entry carries `"type": "stdio"` |
+| Antigravity | `.agents/mcp_config.json` (`mcpServers`, no `cwd` field) | same eight; `xquik` as `serverUrl` |
+| dsh web | `.dsh/agent-presets/reverse-skill/agent.cordis.yml` | ida-pro, ghidra, x64dbg, math, r2, jshook, anything-analyzer (xquik not added: http transport unverified) |
 
 `r2mcp` and `jshook` answer `server/discover` with `-32601` natively, so they do not
 need the `legacy-mcp-stdio.py` wrapper that the Python `mcp==1.6.0` bridges need.
@@ -166,7 +166,122 @@ The session maps are cleared before the recursion, so the server keeps serving; 
 are noise, not a crash. The launcher's health probe closes its own `initialize` session with
 a `DELETE`, so expect one more entry per launcher run. Wait for an upstream fix or carry a
 fork patch under `docs/mcp/patches/`; do not edit the pinned checkout in place, and do not
-report it upstream from this fork.
+report it upstream from this fork. Because of this bug both launchers treat "port open but
+`initialize` fails" as unhealthy and stop with the reason instead of retrying in a loop.
+
+#### Auto-start from the MCP clients (stdio launcher)
+
+The owner does not open the app by hand: every client (Claude Code, Codex, Antigravity, dsh)
+registers [`anything-analyzer-stdio.py`](../../skills/scripts/mcp/anything-analyzer-stdio.py)
+as a **stdio** server and the launcher brings the app up when the client spawns it. It is
+standard-library Python (the bridge venv's `mcp==1.6.0` has no Streamable HTTP client and is
+not imported), so the tested bridge interpreter `D:\WIN_MCP\reverse-mcp-python\Scripts\python.exe`
+(3.13) runs it. Behaviour, in order:
+
+1. `fd 1` is duplicated and parked on stderr before anything else runs; nothing but the proxy
+   leg can ever write to the MCP channel (tests assert empty stdout on every failure path).
+2. Token = `ANYTHING_ANALYZER_MCP_TOKEN` from the process environment, else the User value in
+   `HKCU\Environment` (`winreg`). A stale process value that the app rejects with 401 falls
+   through to the User value with a stderr note, so a client started before the bootstrap
+   rewrote the token still connects. The token is never taken from an argument and never
+   written to a client config; `mcp-remote` receives it only through the child environment.
+3. Health = authenticated Streamable HTTP `initialize` on `127.0.0.1:<port>/mcp` (SSE parsed,
+   `serverInfo.name` must be `anything-analyzer`, probe session closed with `DELETE`). Healthy
+   → reuse. Open but 401 / other server / other name → stop with that reason, nothing killed.
+4. Down → read-only validation of `%APPDATA%\anything-analyzer\mcp-server-config.json`
+   (same nine checks as the PowerShell entrypoint, including token == env), then the named
+   mutex `Local\reverse-skill-AnythingAnalyzer-<port>` shared with `start-local-backend.ps1`
+   (four clients starting together produce exactly one `pnpm dev`; the mutex is held until
+   health passes, and the port is re-probed after acquiring it), then `pnpm dev` with
+   `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP` (+ `CREATE_BREAKAWAY_FROM_JOB` when allowed),
+   stdin `NUL`, stdout/stderr to `%LOCALAPPDATA%\reverse-skill\anything-analyzer\
+   AnythingAnalyzer-<stamp>.{stdout,stderr}.log`, record `AnythingAnalyzer-<stamp>.process.json`.
+   The app survives when the client kills the launcher (verified with the fixture: `/owner`
+   still answers after the launcher exited). pnpm = `shutil.which('pnpm')` (PATHEXT order, so
+   `pnpm.cmd` from PATH, never the `.ps1` shim); `--pnpm` pins it.
+5. Readiness wait `--wait` (default 90 s), then the proxy leg takes over the real stdout:
+   - default `--proxy mcp-remote`: pinned `mcp-remote@0.14.3 http://127.0.0.1:23816/mcp
+     --transport http-only --header "Authorization:Bearer ${ANYTHING_ANALYZER_MCP_TOKEN}"`,
+     run as `node.exe <nodejs>\node_modules\npm\bin\npx-cli.js -y …` instead of `cmd /c npx`:
+     a quoted `C:\Program Files\nodejs\npx.cmd` plus a quoted header value is exactly the case
+     where `cmd.exe` strips the first and last quote. mcp-remote expands `${VAR}` itself (log
+     line `Replacing ${ANYTHING_ANALYZER_MCP_TOKEN} with environment value`). Side effect: it
+     keeps state under `%USERPROFILE%\.mcp-auth\mcp-remote-0.14.3\` (older `0.1.17`/`0.1.29`
+     folders from the Jina registration are already there). First use downloads it via npx.
+   - `--proxy relay` (or `ANYTHING_ANALYZER_PROXY=relay`): built-in JSON-RPC relay, one POST
+     per stdin frame, SSE/JSON answer written as one line, `mcp-session-id` learned from
+     `initialize`, notifications/responses expect 202 and emit nothing, no standalone GET
+     stream. No Node or network needed; use it when npx is unavailable.
+   Both legs passed the three-message smoke (`initialize`, `server/discover` → `-32601`,
+   `tools/list`) against the fake Streamable HTTP server in
+   `skills/scripts/test-mcp-anything-analyzer-stdio.py`, which mirrors the SDK 1.29 transport
+   semantics read from the pinned checkout (406 Accept check, session ids, 400/404, SSE
+   replies, 202 for notifications, 405 GET). **Not verified against the live app** from the
+   session that wrote this (the owner's rule: never start/stop/probe the real app from there).
+   `server/discover` reaches the app, whose SDK answers `-32601`, so the dsh row needs no
+   `legacy-mcp-stdio.py` wrapper.
+
+Client startup timeouts are the real constraint, not `--wait`: Codex gives a stdio server
+`startup_timeout_sec` = 10 by default, Claude Code about 30 s (`MCP_TIMEOUT` in ms, reports
+say the SDK caps it near 60 s). A warm `pnpm dev` (vite builds < 1 s each, then Electron) fits
+inside 30 s on this host; a cold cache may not, in which case the first client attempt fails
+and the next one reuses the app the first attempt left running. Set the Codex timeout
+explicitly (below) and `MCP_TIMEOUT=90000` for Claude Code when the cold start matters.
+
+Shapes to paste (repo = `D:\Data\Coding_Github\Reverse\reverse-skill`, all four files
+gitignored; no `url`, no header, no token anywhere):
+
+```json
+// .mcp.json (Claude Code) — keep "anything-analyzer" in .claude/settings.local.json enabledMcpjsonServers
+"anything-analyzer": {
+  "type": "stdio",
+  "command": "D:\\WIN_MCP\\reverse-mcp-python\\Scripts\\python.exe",
+  "args": ["D:\\Data\\Coding_Github\\Reverse\\reverse-skill\\skills\\scripts\\mcp\\anything-analyzer-stdio.py"]
+}
+```
+
+```toml
+# .codex/config.toml (Codex). env_vars forwards the *name* only (Codex filters the child
+# environment; "Environment variables to allow and forward"); the launcher also falls back to HKCU.
+[mcp_servers.anything-analyzer]
+command = "D:\\WIN_MCP\\reverse-mcp-python\\Scripts\\python.exe"
+args = ["D:\\Data\\Coding_Github\\Reverse\\reverse-skill\\skills\\scripts\\mcp\\anything-analyzer-stdio.py"]
+env_vars = ["ANYTHING_ANALYZER_MCP_TOKEN"]
+startup_timeout_sec = 120
+```
+
+```json
+// .agents/mcp_config.json (Antigravity) — no cwd, no type, no token
+"anything-analyzer": {
+  "command": "D:\\WIN_MCP\\reverse-mcp-python\\Scripts\\python.exe",
+  "args": ["D:\\Data\\Coding_Github\\Reverse\\reverse-skill\\skills\\scripts\\mcp\\anything-analyzer-stdio.py"]
+}
+```
+
+```yaml
+# .dsh/agent-presets/reverse-skill/agent.cordis.yml (dsh web) — append after the Standard composition
+- id: mcp-anything-analyzer
+  name: '@deepseek-ai/dsh-mcp-client'
+  config:
+    serverName: anything-analyzer
+    transport: stdio
+    command: 'D:\WIN_MCP\reverse-mcp-python\Scripts\python.exe'
+    args: ['D:\Data\Coding_Github\Reverse\reverse-skill\skills\scripts\mcp\anything-analyzer-stdio.py']
+    cwd: 'D:\Data\Coding_Github\Reverse\reverse-skill\skills\scripts\mcp'
+```
+
+`bootstrap-reverse.ps1 -Capability anything-analyzer -McpHostTarget …` now writes this stdio
+shape (manifest `mcpBridgeLauncher`; interpreter from `REVERSE_MCP_BRIDGE_PYTHON`, else the
+first `python` on PATH, which is safe because the launcher is stdlib-only) instead of the
+`url` + `Authorization` header form. Set `REVERSE_MCP_BRIDGE_PYTHON=D:\WIN_MCP\reverse-mcp-python\Scripts\python.exe`
+before running it on this host to get the paths above verbatim.
+
+Manual alternative (kept for a client without stdio or for debugging): the plain HTTP
+registration `{"type":"http","url":"http://127.0.0.1:23816/mcp","headers":{"Authorization":"Bearer ${ANYTHING_ANALYZER_MCP_TOKEN}"}}`
+(Codex: `url` + `bearer_token_env_var = "ANYTHING_ANALYZER_MCP_TOKEN"`). It starts nothing,
+and a client whose process environment predates the current token gets 401 until restarted;
+that is exactly what happened on 2026-10-08 (process value ≠ User value while both config
+copies matched the User value).
 
 ### x64dbg
 
