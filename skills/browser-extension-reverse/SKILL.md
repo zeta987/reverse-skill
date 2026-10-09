@@ -12,6 +12,8 @@ description: Use for authorized reverse engineering of browser extensions (Chrom
 3. `NEXT`: 解压扩展；读 manifest
 4. `ACT`: 权限面 → 后台脚本 → 网络/存储钩子
 
+> **rea 可用**：解压后的扩展目录直接 `analyze_javascript_application`（`input_path` 指向解压目录），再 `trace_application_feature` 追权限相关的 API 调用链；已加载进浏览器的扩展页面 / service worker 用 `list_browser_targets` → `inspect_web_page`（被动 CDP）。细节与回灌方式见 `../js-reverse/SKILL.md` 的 rea 段。
+
 ## 适用场景
 
 - Chrome/Edge MV2/MV3 扩展分析

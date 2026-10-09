@@ -386,6 +386,14 @@ function Get-ReverseToolCatalog {
             Fallbacks = @()
         }
         [pscustomobject]@{
+            Name = 'rea'
+            Skill = 'js-reverse'
+            Purpose = '通过 npx 启动 reverse-engineer-anything (REA) MCP：JS/Electron 应用图、托管 PE/CLI、APK/IPA/ZIP 清单、被动 CDP 网页检查、Evidence bundle（需 MCP 注册；npx 本身不代表该能力已安装）'
+            FixedVersion = 'rea-agents@6.1.0'
+            VersionArgs = @()
+            Fallbacks = @()
+        }
+        [pscustomobject]@{
             Name = 'reqable-mcp'
             Skill = 'pentest-tools'
             Purpose = '通过 npx 启动 Reqable 桌面客户端 MCP（需 MCP 注册与 Reqable；npx 本身不代表该能力已安装）'

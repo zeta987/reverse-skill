@@ -114,8 +114,34 @@ The review is read-only and checks scope fields, Evidence records, work item and
 | 来源 | 取什么 | 写成 | 细则 |
 |------|--------|------|------|
 | ARTEX（自主渗透平台） | `findings`、`findings/{id}/lineage`、`findings/export?format=md-single`、finding traffic body、task archive（含 `sha256`） | finding → `F-nnn`；lineage → `P-nnn`（attack）；traffic body / 导出文件 → `E-nnn`（`source_type: network` / `file`，`-ArtifactPath` 记 hash） | `pentest-tools/references/artex-escalation.md` §4 |
+| rea（reverse-engineer-anything MCP，rea-agents 6.1.0） | `export_evidence_bundle` 写出的 bundle JSON（`records[]` 每条带 `evidence_id`、`subject.digest.sha256`、`operation`、`confidence`、`limitations[]`） | 整份 bundle → `E-nnn`（`source_type: file`，`-ArtifactPath` 记 bundle 的 sha256）；被 Finding 引用的单条记录各自 → `E-nnn`，`evidence_id` + `subject.digest.sha256` 写进 notes | 本文 §5.2 |
 
 规则：外部平台的一条结论只算**一份**证据；`status=validated` 仍需第二份独立证据（本包工具复现为佳）。回灌时不得把平台的 token、`.env`、密钥写进 `work/`。
+
+## 5.2 rea Evidence bundle 回灌
+
+rea 的每个分析工具都返回一条 Evidence 记录（`structuredContent.evidence_id`，形如 `ev_<64 hex>`），同一连接的记录保存在会话账本里，`close_binary` 会清空账本，所以**先导出再关闭**。
+
+1. 让 rea 把 bundle 写进 case 目录。路径必须在 CaseRoot 内，`append-evidence.ps1 -ArtifactPath` 拒绝外部路径：
+
+   ```json
+   {"name": "export_evidence_bundle", "arguments": {"path": "<abs>/work/<case>/evidence/rea/<stamp>-bundle.json"}}
+   ```
+
+   返回 `result: {path, bytes, records, unknowns}`；已存在的文件需要 `overwrite: true`。
+2. bundle 顶层字段：`artifacts[]`（`digest.sha256` / `format` / `architecture`）、`providers[]`、`environments[]`、`scenarios[]`、`captures[]`、`unknowns[]`、`records[]`。每条 record：`evidence_id`、`subject{name, digest.sha256, format, local_path}`、`provider{id, name, version}`、`operation`、`predicate_type`、`confidence`（observed / derived / inferred）、`authority`、`limitations[]`、`locations[]`、`evidence_links[]`、`normalized_result`。
+3. 整份 bundle 落一条 Evidence（`content_hash` 由脚本按文件算出，就是 bundle 的 sha256）：
+
+   ```powershell
+   powershell -File skills/scripts/append-evidence.ps1 -CaseRoot work/<case> `
+     -Id E-0xx -Title "rea bundle: <目标>" -SourceType file `
+     -ArtifactPath evidence/rea/<stamp>-bundle.json `
+     -ReproCommand "rea MCP export_evidence_bundle path=<abs>/work/<case>/evidence/rea/<stamp>-bundle.json (rea-agents 6.1.0)" `
+     -Notes "records=<n> unknowns=<m> tools_sha256=<binary_session.server_identity.catalog 的 tools_sha256>"
+   ```
+
+4. 要被 Finding 引用的单条记录各自落一条 Evidence：`-Title` 写 `operation` 与目标，`-Location` 写 `subject.name` 或 `locations[]`，`-Notes` 写 `evidence_id=… subject.sha256=… predicate_type=… confidence=… authority=…`，`-RawExcerptFile` 放 `normalized_result` 的脱敏摘录；`confidence: observed` → `-Status observed`，`derived` / `inferred` → `-Status candidate`。`limitations[]` 与 `unknowns[]` 原文保留进 notes。
+5. 规则同 §5.1：一条 rea 记录只算一份证据，`validated` 仍需第二份独立 Evidence；`subject.local_path` 是本机绝对路径，回写 journal 前脱敏；bundle 不含 token，但 `capture_browser_scenario` 的 `storage` / `secrets` 选择项可能让 `normalized_result` 带上会话数据，导出前确认。
 
 ## 6. 与 Z3r0 的差异（特色）
 

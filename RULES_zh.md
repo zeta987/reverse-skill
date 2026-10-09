@@ -274,6 +274,7 @@
 | anything-analyzer | 23816 | 浏览器自动化 + HTTP 捕获 | 客户端注册 stdio 启动器 `<bridge-python> skills/scripts/mcp/anything-analyzer-stdio.py`，客户端启动时自动拉起/复用应用并代理到 HTTP 端点；不带代理的手动启动：`skills/scripts/mcp/start-local-backend.ps1 -Backend AnythingAnalyzer -LogDir <dir>`（两者都校验 `mcp-server-config.json`、从不杀进程、在项目目录跑 `pnpm dev`） |
 | pentestswarm | 8080（REST API，选配）、11434（Ollama，仅 provider `ollama`） | Pentest Swarm AI 群体渗透（5 个 MCP 工具）；v0.2.31；provider `openai`（所有者自己的中继，key 只在 User 环境变量）、`claude` 经中继（`ANTHROPIC_BASE_URL` 只进子进程）或 `ollama` | 客户端注册 stdio 启动器 `<bridge-python> skills/scripts/mcp/pentestswarm-stdio.py`：只读校验 `%USERPROFILE%\.pentestswarm\config.yaml`，把 User 环境里的中继 key 交给子进程或按需拉起 `ollama serve`（`--ensure-api-server` / `--redis-port 6379` 才会加上 doctor 用的 API server 与 Redis），再执行 `pentestswarm mcp serve`；不带 MCP 子进程的完整链路：`skills/scripts/mcp/start-local-backend.ps1 -Backend PentestSwarm -LogDir <dir>`（两者都复用、从不杀进程；见 `docs/mcp/host-deviations.md`） |
 | jshookmcp | — | JS Hook/CDP/Network/AST | `npx -y @jshookmcp/jshook@0.3.4`（stdio） |
+| rea | —（stdio） | reverse-engineer-anything 6.1.0（138 个 MCP 工具）：JS/Electron 应用图与功能追踪、托管 PE/CLI 元数据、ZIP/APK/IPA/MSIX 清单图、被动 CDP 网页检查、HAR/mitmproxy 存档、Evidence bundle（observed / inferred / unknown） | 客户端注册 pinned 包运行器 `npx -y rea-agents@6.1.0 mcp`（项目级；本机用 `node.exe` + `npx-cli.js`，见 `docs/mcp/host-deviations.md`）。本机未配置任何原生 provider：Hopper 不支持 Windows，Ghidra provider 要求 12.1.x（本机保留 12.0.2 + GhydraMCP），IDA provider 会与 `ida-pro-mcp` 重复登记同一后端。Android `inspect_*`、macOS 原生工具、固件与进程捕获在 Windows 上报 `unsupported_host` / `provider_missing`。rea 没有 scope 门，仍以 `scope.md` 为准 |
 | Ghidra-mcp | 8192 起（REST） | Ghidra 免费反编译（GhydraMCP 用户扩展） | CodeBrowser 启用插件；客户端经 stdio 桥接 `skills/scripts/mcp/ghydra-stdio.py --bridge <bridge_mcp_hydra.py>`（见 `docs/mcp/README.md`） |
 | burpsuite | 9876（HTTP API） | BurpSuite 78 工具全控制（Proxy/Intruder/Repeater/Scanner/Collaborator） | Burp 加载 `burp-mcp-full.jar`；客户端经 stdio 桥接 `node burp-mcp-full/mcp-bridge.js` |
 | ARTEX（升级平台，**非 MCP**） | 8787（Web UI + REST，仅 loopback）、8788（MITM 流量代理，仅 loopback） | 自主渗透平台，自带 planner/worker agent、流量留痕、拦截审批与漏洞复测；只在 pentest-tools / api-security / attack-chain 链 + pentestswarm 覆盖不了已授权目标时使用 | `scope.md` granted 后 agent 可自行启动：`skills/scripts/artex/start-artex.ps1 -Action Start`（Docker Compose；缺 loopback override 即拒绝；从不登录）。任务由用户在 UI 建或用用户提供的 `ARTEX_TOKEN`；结果经 `append-evidence.ps1` 回灌。手册：`skills/pentest-tools/references/artex-escalation.md` |
@@ -469,7 +470,7 @@ Kali Linux（Bash，含 Kali 原生工具链）：
 bash <本包根目录>/kali/scripts/bootstrap-reverse.sh 工具名 --start-services
 ```
 
-支持的能力名（与 `skills/scripts/bootstrap-manifest.json` 保持一致，共 26 项）：jadx、apktool、jeb-pro、binaryninja、frida、frida-ps、idalib-mcp、reqable-mcp、jshookmcp、xquik-mcp、anything-analyzer、idapro、r2、rabin2、adb、agent-browser、ghidra-mcp、seclists、proxycat、burpsuite-mcp、nmap、pentestswarm、binwalk、yara、pwntools、bkcrack
+支持的能力名（与 `skills/scripts/bootstrap-manifest.json` 保持一致，共 27 项）：jadx、apktool、jeb-pro、binaryninja、frida、frida-ps、idalib-mcp、reqable-mcp、jshookmcp、rea、xquik-mcp、anything-analyzer、idapro、r2、rabin2、adb、agent-browser、ghidra-mcp、seclists、proxycat、burpsuite-mcp、nmap、pentestswarm、binwalk、yara、pwntools、bkcrack
 
 ## 刷新工具索引
 

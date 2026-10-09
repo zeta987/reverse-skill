@@ -18,6 +18,8 @@ metadata:
 4. `ACT`: 需要明文/C2 时动态调试；需要改逻辑时 **IL patch** 优先于 C# 重编译
 5. 阶段结束给用户 3–6 项下一步菜单（含导出报告）
 
+> **rea 可用**（MCP 后端 `rea`，见 `docs/mcp/host-deviations.md`）：`inspect_managed_artifact`（`path` 指向 PE/CLI 程序集）给出程序集 / 模块身份、目标框架、引用、资源与自定义属性；`inspect_managed_members` 给成员签名、原始 CIL 哈希与调用边；`project_managed_application_graph` 把两者投成应用图。全部是元数据级、不加载不执行，反编译与 IL patch 仍由 dnSpyEx / ilspycmd 承担；Evidence 回灌见 `../ops/evidence-finding-path.md` §5.2。
+
 ## 适用范围
 
 当任务属于以下场景时优先使用本 skill：

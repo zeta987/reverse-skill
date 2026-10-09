@@ -13,6 +13,8 @@ description: 在 CLI 环境下做 Android APK 逆向时使用。适用于 APK �
 4. `NEXT`: 缺工具时调用 bootstrap，不要猜路径
 5. `ACT`: 进入"工作流"第一步并执行，不要停在确认状态
 
+> **rea 可用（Windows 主机边界）**：`open_binary`（APK）→ `inspect_artifact` → `project_android_application_graph`，拿到内容寻址的组件路径、哈希与 bridge 假设（不解 DEX）。`inspect_android_package` / `inspect_android_class` / `inspect_android_method` / `search_android_classes` / `trace_android_references` 依赖 JADX 子进程，本机 win32 报 `unsupported_host`，Java 层仍由 jadx 承担（Linux / macOS 主机才能启用）。回灌见 `../ops/evidence-finding-path.md` §5.2。
+
 # APK 逆向 CLI 作业规范
 
 ## 适用范围

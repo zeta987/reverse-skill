@@ -12,6 +12,8 @@ description: Use for authorized macOS and Mach-O reverse engineering including c
 3. `NEXT`: tool-index；jtool2/lldb 等
 4. `ACT`: 签名与装载信息 → 静态 → 动态（lldb/Frida）
 
+> **rea 可用（Windows 主机边界）**：`open_binary`（`.app` 目录 / IPA / ZIP）→ `inspect_artifact` → `project_apple_application_graph`，拿到 bundle 层级、扩展 / XPC / helper 角色、launchd plist 与组件哈希（execution-free）。`inspect_macho` / `inspect_plist` / `inspect_signature` / `list_architectures` / `inspect_asset_catalog` 与 DMG 挂载在本机报 `unsupported_host`，需要 macOS；Mach-O 静态仍走 jtool2 / Ghidra。回灌见 `../ops/evidence-finding-path.md` §5.2。
+
 ## 适用场景
 
 - Mach-O 可执行文件 / dylib / framework
