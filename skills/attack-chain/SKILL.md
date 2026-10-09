@@ -12,7 +12,8 @@ description: Use for authorized multi-stage attack-path planning and orchestrati
 4. `NEXT`: 读取 `../tool-index.md`，校验工具可用性和实际路径
 5. `NEXT`: 缺工具时调用 bootstrap，不要猜路径
 6. `ACT`: 按 `references/lifecycle-checklist.md` 过阶段门闩；每阶段更新 `timeline.md` + `workitems.md`（`../ops/timeline-workitem.md`）；发现提升为 Evidence/Finding
-7. 结束：`docs-generator` 报告必须含 Evidence 链
+7. `ESCALATE`: 某阶段靠子 skill + pentestswarm 推不动（需要多轮自主探索、全程流量留痕或漏洞复测）且 scope 已 granted → 可自行启动 ARTEX 接手该阶段（`../pentest-tools/references/artex-escalation.md`）；ARTEX 的 finding / lineage / 归档回灌为本 case 的 Evidence / Path，再回到本 Skill 评估下一步
+8. 结束：`docs-generator` 报告必须含 Evidence 链
 
 > 多阶段攻击路径规划与执行的总指挥。当任务需要"从 A 打到 B"的完整链路时，本 Skill 负责编排各阶段、协调子 Skill、规划攻击路径。
 > 不是"红队专属"——任何需要跨阶段组合的渗透场景都从这里开始。

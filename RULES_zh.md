@@ -276,6 +276,7 @@
 | jshookmcp | — | JS Hook/CDP/Network/AST | `npx -y @jshookmcp/jshook@0.3.4`（stdio） |
 | Ghidra-mcp | 8192 起（REST） | Ghidra 免费反编译（GhydraMCP 用户扩展） | CodeBrowser 启用插件；客户端经 stdio 桥接 `skills/scripts/mcp/ghydra-stdio.py --bridge <bridge_mcp_hydra.py>`（见 `docs/mcp/README.md`） |
 | burpsuite | 9876（HTTP API） | BurpSuite 78 工具全控制（Proxy/Intruder/Repeater/Scanner/Collaborator） | Burp 加载 `burp-mcp-full.jar`；客户端经 stdio 桥接 `node burp-mcp-full/mcp-bridge.js` |
+| ARTEX（升级平台，**非 MCP**） | 8787（Web UI + REST，仅 loopback）、8788（MITM 流量代理，仅 loopback） | 自主渗透平台，自带 planner/worker agent、流量留痕、拦截审批与漏洞复测；只在 pentest-tools / api-security / attack-chain 链 + pentestswarm 覆盖不了已授权目标时使用 | `scope.md` granted 后 agent 可自行启动：`skills/scripts/artex/start-artex.ps1 -Action Start`（Docker Compose；缺 loopback override 即拒绝；从不登录）。任务由用户在 UI 建或用用户提供的 `ARTEX_TOKEN`；结果经 `append-evidence.ps1` 回灌。手册：`skills/pentest-tools/references/artex-escalation.md` |
 
 使用 MCP 工具前：
 1. 先确认 `tool-index.md` 中该服务的 `MCP 已注册` 状态

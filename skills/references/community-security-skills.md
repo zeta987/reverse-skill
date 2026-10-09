@@ -37,6 +37,13 @@
 | [appsecsanta AI pentesting agents 2026](https://appsecsanta.com/research/ai-pentesting-agents-2026) | 39+ 开源 AI 渗透 agent 架构分类 | 多 agent ≠ 必须；我们用 role-map |
 | Snyk 评测「更多 skill ≠ 更好」 | 技能堆叠可能降低审计质量 | 强化「深 skill + 路由」策略 |
 
+### 1.2 本机已部署的外部平台（2026-10-09 补）
+
+| 仓库 / 资源 | 定位 | 本包落点 | 风险 / 边界 |
+|-------------|------|----------|-------------|
+| [mhtsec/ARTEX](https://github.com/mhtsec/ARTEX)（本机 fork，v0.3.15；原 `Autumn-27/ARTEX` 已删除） | 自主渗透**平台**：Go + Next.js + PostgreSQL，双图（资产图 / 探索图）、planner/worker 多 agent、MITM 流量留痕、拦截审批、漏洞复测、IM 推送、ScopeSentry 同步；REST + JWT，**无 MCP server**（`mcphttp/` 是 client） | 不作 MCP 后端（与 pentestswarm 编排器角色重叠，且需另写 REST→MCP bridge）；作为 `pentest-tools` / `attack-chain` / `api-security` 的**升级路径**，`scripts/artex/start-artex.ps1` 仅 loopback 启动，产物回灌 Evidence 链（`pentest-tools/references/artex-escalation.md`） | AGPL-3.0 + 作者附加「禁止实测」条款（fork `CLAUDE.md` 改为仅授权目标）；Docker Hub 镜像与 Releases 已失效，只能本机构建 `artex:local`；`update.sh` / 页面更新写死已删 repo，禁用 |
+| [morluto/rea](https://github.com/morluto/rea)（6.1.0） | 单一 MCP server + CLI：JS/Electron 应用图、.NET、APK、网站/HAR、Apple bundle、EVM、原生二进制（Hopper/Ghidra/IDA provider），结果带 observed/inferred/unknown Evidence | 作 MCP 后端接入（另一 session 处理）：路由自 `js-reverse` / `dotnet-reverse` / `macos-reverse` / `apk-reverse` / `browser-extension-reverse`；Evidence bundle 回灌 | 刻意无 scope/permission 门（上游 PR #555），授权门留在本包；Windows 上 Hopper / process capture / 固件提取不可用，Ghidra provider 需 12.1.x（本机 12.0.2 不替换），IDA provider 与现有 ida-pro-mcp 同后端不重复登记 |
+
 ## 2. 安全标准与威胁（2025–2026）
 
 | 来源 | 要点 | 本包落点 |
@@ -53,6 +60,7 @@
 | 渗透/攻击链/SRC | pentest-tools + attack-chain + src-hunter | Orizon 类可作方法论对照 |
 | LLM/Agent 安全 | llm-security | AST10 增强 skill 自身安全 |
 | 证据/scope/角色 | **ops/**（特色） | 多数 skill 包没有 case 契约 |
+| 自主渗透平台（ARTEX 类） | 不并入、不作后端；升级路径 + 产物回灌 | 平台自带 agent 与审批门，与本包 scope 门并行会分裂证据来源；只在 scope granted 后由 agent 自行拉起 |
 | OT/ICS / 纯 GRC / 欺诈 F3 | 无独立 skill | 路由未命中 → 提议新增或外链，不硬塞 |
 | 800+ 微 skill | 不复制 | 用 MASTER 路由 + 域 skill 替代碎片化 |
 

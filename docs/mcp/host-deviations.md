@@ -620,6 +620,26 @@ Plugin `MCPx64dbg.dp64/.dp32` is in the x64dbg plugins folders. Start x64dbg
 (empty session is enough) so `http://127.0.0.1:8888/` answers; the bridge needs the
 trailing slash in `X64DBG_URL`.
 
+### ARTEX (escalation platform, not registered as MCP)
+
+Local fork at `<repo parent>\ARTEX` (mirror of `mhtsec/ARTEX` v0.3.15; the original
+`Autumn-27/ARTEX` repository and its Docker Hub image are gone). ARTEX is a standalone
+autonomous pentest platform with its own planner/worker agents, a MITM recording proxy and
+an intercept-approval gate; it exposes REST + JWT only, so there is nothing to put in the
+four client mirrors and no bootstrap-manifest capability. It is wired in as an
+**escalation path** for `pentest-tools` / `api-security` / `attack-chain`
+(`skills/pentest-tools/references/artex-escalation.md`), not as a backend.
+
+Start/probe/stop: `skills/scripts/artex/start-artex.ps1 -Action Start|Status|Stop`.
+The script resolves the root from `-ArtexRoot`, `ARTEX_ROOT`, then `<repo parent>\ARTEX`;
+requires `.env` and `jwt.key` to exist as files; refuses to start unless
+`docker-compose.override.yml` pins 8787 and 8788 to `127.0.0.1` (the upstream compose file
+publishes 8787 on all interfaces); requires the locally built `artex:local` image; polls
+`GET /api/health` and reports `initialized` from `/api/auth/status`. It never logs in and
+never prints `.env`, `jwt.key` or a token. `Stop` runs `docker compose stop` so `pgdata` and
+`data/` survive. Do not run `update.sh`, `docker compose pull` or the in-app updater: they
+point at the deleted upstream. Build and deploy steps live in `ARTEX/CLAUDE.md`.
+
 ## Index artefacts to know about
 
 All three were fixed in the fork on 2026-10-08; they are kept here as the record of

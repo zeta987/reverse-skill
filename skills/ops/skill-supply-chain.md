@@ -29,6 +29,7 @@
 | 提示注入进 skill | SKILL 正文藏隐蔽指令 | 审阅 diff；禁止「隐藏在 HTML 注释的执行指令」不经用户 |
 | 范围漂移 | skill 诱导扩大扫描 / 「一个域名全自动打穿」 | ops/scope-contract：out_of_scope + auth；禁止无 in_scope 的狂扫 |
 | 技能堆叠过载 | 同时挂载过多 skill 反而漏报（公开评测观察） | 只加载 PRIMARY + 必要 secondary（MASTER-ROUTING） |
+| 自带 LLM agent 的外部平台 | 平台（如 ARTEX）用用户自己的 LLM key 自主派 worker 打目标，动作不经本宿主的工具批准链 | 只作「升级路径」不作后端：scope granted 后才启动、仅 loopback、agent 不登录不设密码、任务由用户建或用用户给的 token；产物按 `evidence-finding-path.md` §5.1 回灌（`pentest-tools/references/artex-escalation.md`） |
 
 ## 3. 安装外部 skill 的 MUST 清单
 

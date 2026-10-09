@@ -107,6 +107,16 @@ The review is read-only and checks scope fields, Evidence records, work item and
 
 完整敏感内容只在用户项目报告中；journal **MUST** 脱敏（`anonymization.md`）。
 
+## 5.1 外部平台产物回灌
+
+本包之外的分析/渗透平台产出的结论**不直接**变成 Finding；先落成 Evidence，再按第 2 节绑定：
+
+| 来源 | 取什么 | 写成 | 细则 |
+|------|--------|------|------|
+| ARTEX（自主渗透平台） | `findings`、`findings/{id}/lineage`、`findings/export?format=md-single`、finding traffic body、task archive（含 `sha256`） | finding → `F-nnn`；lineage → `P-nnn`（attack）；traffic body / 导出文件 → `E-nnn`（`source_type: network` / `file`，`-ArtifactPath` 记 hash） | `pentest-tools/references/artex-escalation.md` §4 |
+
+规则：外部平台的一条结论只算**一份**证据；`status=validated` 仍需第二份独立证据（本包工具复现为佳）。回灌时不得把平台的 token、`.env`、密钥写进 `work/`。
+
 ## 6. 与 Z3r0 的差异（特色）
 
 | Z3r0 | reverse-skill |

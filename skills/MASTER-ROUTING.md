@@ -130,6 +130,7 @@ python3 skills/case-review/scripts/review_case.py work/<case> --verify-hashes --
 | 任务 | 处理 |
 |------|------|
 | 纯 CTF 多类型编排 | PRIMARY `ctf-sandbox/` → sidecar `../CTF-Sandbox-Orchestrator/` |
+| 网络安全任务本包工具链（R10/R11/R12 + pentestswarm）搞不定 | PRIMARY 不变 → 升级到独立平台 ARTEX：`pentest-tools/references/artex-escalation.md`（scope granted 后 agent 可自行 `scripts/artex/start-artex.ps1`，仅 loopback；非 MCP，不进 tool-index） |
 
 ## 读序
 

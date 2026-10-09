@@ -11,6 +11,7 @@ description: Use for authorized security assessment of REST, GraphQL, WebSocket,
 3. `NEXT`: 读取 `../tool-index.md`，校验工具可用性和实际路径
 4. `NEXT`: 缺工具时调用 bootstrap，不要猜路径
 5. `ACT`: 进入"工作流"第一步并执行，不要停在确认状态
+6. `ESCALATE`: 10 阶段跑完仍需多轮自主探索（跨端点关联、授权链、复测）且 `scope.md` 已 granted → 按 `../pentest-tools/references/artex-escalation.md` 自行启动 ARTEX，结果回灌 Evidence 链
 
 > 覆盖 REST / GraphQL / WebSocket / SOAP 全协议
 > 10 阶段方法论，从发现到 CI/CD 集成
