@@ -54,12 +54,53 @@ this machine's absolute paths.
 |---|---|---|
 | Codex CLI | `.codex/config.toml` (project scope, repo is trusted) | ida-pro-mcp, Ghidra-mcp, x64dbg-mcp, math-mcp, r2mcp, jshook, xquik, anything-analyzer (stdio launcher, see below), pentestswarm (stdio launcher, see below). **No `rea`**: its 138-tool catalog would load into every Codex turn; add `[mcp_servers.rea]` by hand later if wanted (shape below) |
 | Claude Code | `.mcp.json` + `.claude/settings.local.json` (`enabledMcpjsonServers`) | the nine above plus `rea` (package runner, see below); every stdio entry carries `"type": "stdio"` |
-| Antigravity | `.agents/mcp_config.json` (`mcpServers`, no `cwd` field) | the nine above plus `rea`; `xquik` as `serverUrl` |
+| Antigravity | `.agents/mcp_config.json` (`mcpServers`, no `cwd` field) | the nine above plus `rea`; `xquik` as `serverUrl`; Ghidra-mcp, r2mcp and x64dbg-mcp use the lazy stdio gateway described below |
 | dsh web | `.dsh/agent-presets/reverse-skill/agent.cordis.yml` | ida-pro, ghidra, x64dbg, math, r2, jshook, anything-analyzer, pentestswarm, rea (xquik not added: http transport unverified) |
 
 `r2mcp`, `jshook` and `rea` answer `server/discover` with `-32601` natively (`rea` also
 answers `ping` with `{}`), so they do not need the `legacy-mcp-stdio.py` wrapper that the
 Python `mcp==1.6.0` bridges need.
+
+### agy on-demand Ghidra, r2 and x64dbg (2026-10-10)
+
+The original project CLI run reached authentication and created a conversation,
+then waited for `Ghidra-mcp`, `r2mcp` and `x64dbg-mcp` during MCP initialization.
+The agy print-mode timeout did not bound that initialization wait. This alone
+does not identify a GUI problem: Ghydra performs local instance registration and
+discovery before starting stdio; x64dbg enters FastMCP directly; r2 initializes
+its core and plugins before reading requests.
+
+Only those three entries in the original `.agents/mcp_config.json` now use
+[`lazy-stdio.py`](../../skills/scripts/mcp/lazy-stdio.py). Their original command,
+arguments and environment are retained behind `--`; other servers and the
+Codex, Claude Code and dsh registrations are unchanged by this adapter change.
+The local gateway handles the agy handshake and publishes `discover_tools` /
+`call_tool` without importing or starting the original backend. Original tool
+names and schemas become available on the first explicit discovery call.
+
+Demand initializes a separate child MCP connection with the legacy-compatible
+protocol, preserving negotiated protocol and tool metadata. Discovery follows
+all catalog pages; r2 can paginate. Requests have bounded monotonic deadlines.
+Transport failure returns a tool error and exits the gateway, reclaiming the
+owned stdio child tree; reconnect before retrying, with no automatic replay of
+possibly executed actions. Healthy backend tool errors remain tool results.
+
+This wrapper does not open Ghidra/x64dbg, select a program, open an r2 file or
+attach a process. Ghidra `instances_list` can report no instances, and x64dbg
+`IsDebugging` can return false both for an inactive debugger and for a connection
+failure. r2 `list_sessions` depends on `r2agent`; an empty list alone does not
+prove that dependency is healthy. Native per-tool approval rules, resources and
+prompts are not retained by the two-tool gateway.
+
+Verified with the native agy CLI in the original repository, using its complete
+project configuration (no isolated MCP file): the idle model turn completed in
+13.37 s, advertised both gateways for all three servers, made no tool calls and
+logged no continuing-MCP-connection wait. Demand recorded all three discoveries
+and `instances_list`, `list_sessions`, `IsDebugging` calls as completed; r2
+returned an empty list and x64dbg returned false. Both CLI runs exited 0. No new
+backend processes remained afterward. The synthetic stdio suite also passed
+blocked-input/output, EOF, timeout and hard-kill descendant cleanup checks.
+These checks verify MCP loading and forwarding, not GUI backend health.
 `xquik` needs an OAuth login once per client (`/mcp` in Claude Code,
 `codex mcp login xquik`); no credential lives in these files.
 

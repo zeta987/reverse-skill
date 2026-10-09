@@ -59,6 +59,30 @@ The agent should perform startup and verification when authorized, rather than
 ask the user to copy tutorial commands. GUI applications or licenses that
 actually require a human decision are reported with their precise blocker.
 
+### Defer an existing stdio backend
+
+For a client that waits for every registered backend during startup, wrap its
+existing command with [`lazy-stdio.py`](../../skills/scripts/mcp/lazy-stdio.py):
+
+```text
+<python> <repo>/skills/scripts/mcp/lazy-stdio.py --server-name <name> --startup-timeout 30 --tool-timeout 60 -- <original-command> <original-args...>
+```
+
+Preserve the server name, environment and working directory. The gateway answers
+initialization, ping and tool listing locally, exposing only `discover_tools` and
+`call_tool`. First demand starts the original stdio command, initializes it and
+fetches its current catalog. Call original tools through `call_tool` with `name`
+and `arguments`; results retain their content, structured fields and errors.
+This delays loading the bridge itself; it does not start a debugger GUI or open a
+sample. The current agy project entries for Ghidra, r2 and x64dbg use this wrapper.
+
+The child has separate startup and request deadlines. A transport timeout or
+broken child is reported as a tool error before the gateway exits and reclaims
+its own process tree; reconnect the MCP before retrying. A failed action is never
+automatically replayed. Tools-only gateway mode does not expose native resources,
+prompts or individual tool approval rules. Review authorization for the selected
+backend tool before using the generic call entry.
+
 For the currently supported IDA headless, x64dbg, Anything Analyzer and
 Pentest Swarm AI entrypoints, use
 [`start-local-backend.ps1`](../../skills/scripts/mcp/start-local-backend.ps1).
