@@ -19,7 +19,7 @@ start an analysis backend or supply a license.
 | `Ghidra-mcp` | Tested bridge Python + the verified GhydraMCP stdio launcher | `GHIDRA_HYDRA_HOST=127.0.0.1`; no positional 13337 URL |
 | `x64dbg-mcp` | Tested bridge Python + repo `skills/scripts/mcp/x64dbg-stdio.py --bridge <installed-x64dbg.py>` | `X64DBG_URL=http://127.0.0.1:8888/` |
 | `math-mcp` | Existing Node + `math-mcp/build/index.js` | None required |
-| `anything-analyzer` | Tested bridge Python + repo `skills/scripts/mcp/anything-analyzer-stdio.py` (starts/reuses the app, then proxies to `127.0.0.1:23816/mcp`) | `env_vars = ["ANYTHING_ANALYZER_MCP_TOKEN"]`, `startup_timeout_sec = 120`; no url or header (see `host-deviations.md`) |
+| `anything-analyzer` | Tested bridge Python + repo `skills/scripts/mcp/anything-analyzer-stdio.py` (lazy `discover_tools` / `call_tool` gateway; starts/reuses the app on demand) | `env_vars = ["ANYTHING_ANALYZER_MCP_TOKEN"]`, `tool_timeout_sec = 120` for cold starts; no url or header (see `host-deviations.md`) |
 | `pentestswarm` | Tested bridge Python + repo `skills/scripts/mcp/pentestswarm-stdio.py` (brings up Ollama, then runs `pentestswarm mcp serve` on the same stdio; the API server is opt-in) | `startup_timeout_sec = 120`; no `env_vars`: the launcher resolves paths and the relay key (`PENTESTSWARM_ORCHESTRATOR_API_KEY`, User scope) from the registry itself (see `host-deviations.md`) |
 
 Resolve each path from the current installation. The same backend should have

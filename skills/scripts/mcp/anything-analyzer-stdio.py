@@ -1,9 +1,13 @@
-"""Start or reuse Anything Analyzer, then bridge MCP stdio to its Streamable HTTP endpoint.
+"""Expose an on-demand MCP gateway to Anything Analyzer's Streamable HTTP endpoint.
 
 Standard library only, so any Python 3.9+ can run it (the tested bridge venv has
 mcp==1.6.0, which has no Streamable HTTP client; nothing here imports mcp).
 
-Flow: stdout is parked on stderr first (the MCP channel must stay clean), the bearer
+The default lazy gateway handles handshake and tool listing locally. Only a valid
+discover_tools or call_tool request performs backend startup. Explicit relay and
+mcp-remote modes retain the eager bridge behavior below.
+
+Flow on demand: stdout is parked on stderr first (the MCP channel must stay clean), the bearer
 token is taken from ANYTHING_ANALYZER_MCP_TOKEN (process env, else the User
 environment in HKCU\\Environment; never from an argument), the listener on
 127.0.0.1:<port> is probed with an authenticated `initialize`, and when it is down
@@ -169,10 +173,12 @@ def port_open(port, timeout=0.4):
         return False
 
 
-def mcp_post(port, token, payload, session_id=None, timeout=4.0, method='POST'):
+def mcp_post(port, token, payload, session_id=None, timeout=4.0, method='POST', protocol_version=None):
     headers = {'Accept': 'application/json, text/event-stream', 'Authorization': f'Bearer {token}'}
     if session_id:
         headers['mcp-session-id'] = session_id
+    if protocol_version:
+        headers['MCP-Protocol-Version'] = protocol_version
     data = None
     if payload is not None:
         data = json.dumps(payload).encode('utf-8')
@@ -504,6 +510,144 @@ def ensure_backend(args, candidates):
 
 # --- proxy legs ----------------------------------------------------------------------
 
+GATEWAY_TOOLS = [
+    {'name': 'discover_tools',
+     'description': 'Discover Anything Analyzer tools with their original names, descriptions, input schemas and annotations. Call this before call_tool and follow each returned schema. On demand this may launch the Anything Analyzer application.',
+     'inputSchema': {'type': 'object', 'properties': {}, 'additionalProperties': False}},
+    {'name': 'call_tool',
+     'description': 'Call an Anything Analyzer tool using the exact name and arguments from discover_tools. Discover tools first and review the selected tool description and schema before calling it. This may launch the application and may execute actions or modify state.',
+     'inputSchema': {'type': 'object', 'properties': {'name': {'type': 'string', 'minLength': 1}, 'arguments': {'type': 'object'}},
+                     'required': ['name', 'arguments'], 'additionalProperties': False}},
+]
+
+
+def run_lazy(args, mcp_fd):
+    """Sequential local JSON-RPC gateway; no backend work before validated tool demand."""
+    out = os.fdopen(mcp_fd, 'wb', buffering=0, closefd=False)
+    connection = None
+
+    def error_reply(request_id, code, message):
+        return {'jsonrpc': '2.0', 'id': request_id, 'error': {'code': code, 'message': message}}
+
+    def tool_error(message):
+        return {'content': [{'type': 'text', 'text': message}], 'isError': True}
+
+    def backend_request(method, params):
+        nonlocal connection
+        if connection is None:
+            # These helpers can read credentials/configuration, probe sockets and spawn
+            # the GUI. Keep all of them behind validated request demand.
+            repair_environment()
+            token, _, _ = ensure_backend(args, token_candidates())
+            _, session, reply = mcp_post(args.port, token, INITIALIZE, timeout=args.relay_timeout)
+            result = reply.get('result') if isinstance(reply, dict) else None
+            if not isinstance(result, dict) or result.get('serverInfo', {}).get('name') != SERVER_NAME:
+                raise LauncherError('Backend initialization failed.')
+            protocol = result.get('protocolVersion')
+            if not isinstance(protocol, str) or not protocol:
+                raise LauncherError('Backend protocol negotiation failed.')
+            mcp_post(args.port, token, {'jsonrpc': '2.0', 'method': 'notifications/initialized'},
+                     session_id=session, timeout=args.relay_timeout, protocol_version=protocol)
+            connection = (token, session, protocol)
+        token, session, protocol = connection
+        _, _, reply = mcp_post(args.port, token, {'jsonrpc': '2.0', 'id': 2, 'method': method, 'params': params},
+                               session_id=session, timeout=args.relay_timeout, protocol_version=protocol)
+        if not isinstance(reply, dict) or 'error' in reply or not isinstance(reply.get('result'), dict):
+            raise LauncherError('Backend request failed.')
+        return reply['result']
+
+    for raw in sys.stdin.buffer:
+        try:
+            message = json.loads(raw.decode('utf-8'), parse_constant=int)
+        except (UnicodeError, ValueError):
+            reply = error_reply(None, -32700, 'Parse error')
+        else:
+            if (not isinstance(message, dict) or message.get('jsonrpc') != '2.0'
+                    or not isinstance(message.get('method'), str)
+                    or ('id' in message and (isinstance(message['id'], bool)
+                                            or not isinstance(message['id'], (str, int, float, type(None)))))):
+                reply = error_reply(None, -32600, 'Invalid request')
+            else:
+                request_id = message.get('id')
+                method, params = message['method'], message.get('params', {})
+                reply = None
+                if not isinstance(params, dict):
+                    reply = error_reply(request_id, -32602, 'Invalid params')
+                elif method == 'initialize':
+                    if (not isinstance(params.get('protocolVersion'), str)
+                            or not isinstance(params.get('capabilities'), dict)
+                            or not isinstance(params.get('clientInfo'), dict)
+                            or not all(isinstance(params['clientInfo'].get(k), str) for k in ('name', 'version'))):
+                        reply = error_reply(request_id, -32602, 'Invalid params')
+                    else:
+                        protocol = params['protocolVersion']
+                        if protocol not in ('2024-11-05', '2025-03-26', '2025-11-25'):
+                            protocol = '2025-03-26'
+                        reply = {'jsonrpc': '2.0', 'id': request_id, 'result': {
+                            'protocolVersion': protocol, 'capabilities': {'tools': {'listChanged': False}},
+                            'serverInfo': {'name': SERVER_NAME, 'version': '1.1'},
+                            'instructions': 'Use discover_tools before call_tool. Tool demand may launch Anything Analyzer; initialization and listing do not.'}}
+                elif method in ('ping', 'tools/list'):
+                    if set(params) - {'_meta'} or ('_meta' in params and not isinstance(params['_meta'], dict)):
+                        reply = error_reply(request_id, -32602, 'Invalid params')
+                    else:
+                        reply = {'jsonrpc': '2.0', 'id': request_id,
+                                 'result': {'tools': GATEWAY_TOOLS} if method == 'tools/list' else {}}
+                elif method == 'notifications/initialized':
+                    if set(params) - {'_meta'} or ('_meta' in params and not isinstance(params['_meta'], dict)):
+                        reply = error_reply(request_id, -32602, 'Invalid params')
+                elif method == 'tools/call':
+                    name, arguments = params.get('name'), params.get('arguments', {})
+                    valid = (isinstance(arguments, dict) and not (set(params) - {'name', 'arguments', '_meta'})
+                             and ('_meta' not in params or isinstance(params['_meta'], dict)))
+                    if name == 'discover_tools':
+                        valid = valid and not arguments
+                    elif name == 'call_tool':
+                        valid = (valid and set(arguments) == {'name', 'arguments'}
+                                 and isinstance(arguments.get('name'), str) and bool(arguments['name'].strip())
+                                 and isinstance(arguments.get('arguments'), dict))
+                    else:
+                        valid = False
+                    if not valid:
+                        reply = error_reply(request_id, -32602, 'Invalid params or unknown gateway tool')
+                    elif 'id' in message:
+                        try:
+                            if name == 'discover_tools':
+                                tools, cursors = [], set()
+                                page_params = {'_meta': params['_meta']} if '_meta' in params else {}
+                                while True:
+                                    page = backend_request('tools/list', page_params)
+                                    if not isinstance(page.get('tools'), list) or not all(isinstance(tool, dict) for tool in page['tools']):
+                                        raise LauncherError('Invalid backend tool list.')
+                                    tools.extend(page['tools'])
+                                    cursor = page.get('nextCursor')
+                                    if cursor is None:
+                                        break
+                                    if not isinstance(cursor, str) or not cursor or cursor in cursors:
+                                        raise LauncherError('Invalid backend pagination.')
+                                    cursors.add(cursor)
+                                    page_params['cursor'] = cursor
+                                result = {'content': [{'type': 'text', 'text': json.dumps({'tools': tools}, ensure_ascii=False)}]}
+                            else:
+                                backend_params = dict(arguments)
+                                if '_meta' in params:
+                                    backend_params['_meta'] = params['_meta']
+                                result = backend_request('tools/call', backend_params)
+                        except (LauncherError, urllib.error.URLError, OSError, ValueError):
+                            # A failed request may already have executed. Do not replay it;
+                            # later explicit demand can establish a fresh session and retry.
+                            connection = None
+                            result = tool_error('Anything Analyzer request failed. Check the backend configuration, token and availability, then retry explicitly. The failed action was not replayed.')
+                        reply = {'jsonrpc': '2.0', 'id': request_id, 'result': result}
+                else:
+                    reply = error_reply(request_id, -32601, 'Method not found')
+                if 'id' not in message:
+                    reply = None
+        if reply is not None:
+            out.write(json.dumps(reply, separators=(',', ':'), ensure_ascii=False).encode('utf-8') + b'\n')
+    return 0
+
+
 class ProxyJob:
     """Own the proxy subtree: a Windows Job Object with KILL_ON_JOB_CLOSE whose only handle lives
     in this launcher, so node -> cmd -> mcp-remote die together with it even on TerminateProcess
@@ -734,7 +878,7 @@ def parse_args(argv):
     parser.add_argument('--pnpm', default=os.environ.get('ANYTHING_ANALYZER_PNPM', ''), help='pnpm launcher (default: first pnpm on PATH)')
     parser.add_argument('--log-dir', default=os.environ.get('ANYTHING_ANALYZER_LOG_DIR', ''), help='default %%LOCALAPPDATA%%\\reverse-skill\\anything-analyzer')
     parser.add_argument('--wait', type=float, default=float(os.environ.get('ANYTHING_ANALYZER_WAIT_SECONDS', 90)), help='seconds to wait for readiness (client startup timeouts still apply)')
-    parser.add_argument('--proxy', choices=('mcp-remote', 'relay'), default=os.environ.get('ANYTHING_ANALYZER_PROXY', 'mcp-remote'))
+    parser.add_argument('--proxy', choices=('lazy', 'mcp-remote', 'relay'), default=os.environ.get('ANYTHING_ANALYZER_PROXY', 'lazy'), help='lazy gateway by default; relay/mcp-remote start the backend eagerly')
     parser.add_argument('--mcp-remote-version', default=os.environ.get('ANYTHING_ANALYZER_MCP_REMOTE_VERSION', MCP_REMOTE_VERSION))
     parser.add_argument('--relay-timeout', type=float, default=120.0)
     parser.add_argument('--check-only', action='store_true', help='ensure the backend, print the health JSON to stderr, exit without a proxy')
@@ -744,11 +888,13 @@ def parse_args(argv):
 def main(argv=None):
     mcp_fd = park_stdout()
     install_termination_signals()
-    repaired = repair_environment()
-    if repaired:
-        log('restricted client environment: filled ' + ', '.join(repaired) + ' from the registry/defaults')
     args = parse_args(argv)
     try:
+        if args.proxy == 'lazy' and not args.check_only:
+            return run_lazy(args, mcp_fd)
+        repaired = repair_environment()
+        if repaired:
+            log('restricted client environment: filled ' + ', '.join(repaired) + ' from the registry/defaults')
         candidates = token_candidates()
         token, health, record = ensure_backend(args, candidates)
         if args.check_only:

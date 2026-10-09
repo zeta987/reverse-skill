@@ -179,9 +179,45 @@ edit the pinned checkout in place, and do not report it upstream from this fork.
 this bug both launchers also treat "port open but `initialize` fails" as unhealthy and stop
 with the reason instead of retrying in a loop.
 
-#### Auto-start from the MCP clients (stdio launcher)
+#### On-demand MCP gateway (2026-10-10)
 
-The owner does not open the app by hand: every client (Claude Code, Codex, Antigravity, dsh)
+All four Windows project entries (Claude Code, Codex, Antigravity and dsh) point
+to [`anything-analyzer-stdio.py`](../../skills/scripts/mcp/anything-analyzer-stdio.py).
+Its default is now `--proxy lazy`: initialization, ping and `tools/list` are
+answered locally without probing the backend, reading its token/config or
+starting the desktop app. The client receives only two gateway tools:
+
+1. `discover_tools`: call only when the task needs Anything Analyzer. It starts
+   or reuses the authenticated backend and returns its current tool catalog,
+   including descriptions, schemas and annotations.
+2. `call_tool`: pass an original backend tool `name` and `arguments` from that
+   catalog. Backend results, including images, structured content and `isError`,
+   pass through intact. This tool can perform actions; assess authorization from
+   the selected backend tool and task scope.
+
+The gateway retains a backend MCP session after first demand. Startup failures
+become tool errors so the same connection can retry after the configuration is
+corrected; actions are not automatically replayed. No catalog cache or dynamic
+tool-list reload support is required. Original tool names are no longer native
+client tools in lazy mode: invoke them through `call_tool`. Native per-tool
+approval rules must therefore be reviewed when switching an existing caller to
+this gateway. Lazy mode advertises only tools; native resources such as
+`sessions://list`, `app://status` and `browser://tabs` remain available in the
+explicit eager modes. The app continues running after the gateway exits, as before.
+
+Existing project registrations need no change unless they explicitly select
+`--proxy relay`, `--proxy mcp-remote` or set `ANYTHING_ANALYZER_PROXY` to either;
+these retain eager startup and the original native tool catalog. `--check-only`
+and `start-local-backend.ps1` also remain explicit startup operations. Cold start
+time now belongs to the first **tool call**, so allow its readiness wait in the
+client's tool timeout (the local Codex entry already has `tool_timeout_sec = 120`).
+Reload/restart each client's MCP connection to obtain the gateway tool catalog;
+an already-running bridge retains its old behavior.
+
+#### Previous eager startup and explicit proxy modes
+
+The following records the previous default and still applies to explicitly
+selected `--proxy relay` / `--proxy mcp-remote`. In those modes, every client (Claude Code, Codex, Antigravity, dsh)
 registers [`anything-analyzer-stdio.py`](../../skills/scripts/mcp/anything-analyzer-stdio.py)
 as a **stdio** server and the launcher brings the app up when the client spawns it. It is
 standard-library Python (the bridge venv's `mcp==1.6.0` has no Streamable HTTP client and is
@@ -273,7 +309,7 @@ not imported), so the tested bridge interpreter `D:\WIN_MCP\reverse-mcp-python\S
    `server/discover` reaches the app, whose SDK answers `-32601`, so the dsh row needs no
    `legacy-mcp-stdio.py` wrapper.
 
-Client startup timeouts are the real constraint, not `--wait`: Codex gives a stdio server
+For these eager modes, client startup timeouts are the real constraint, not `--wait`: Codex gives a stdio server
 `startup_timeout_sec` = 10 by default, Claude Code about 30 s (`MCP_TIMEOUT` in ms, reports
 say the SDK caps it near 60 s). What the dev log supports: the two vite builds take well
 under 1 s each; the Electron startup time until `[MCP Server] Listening` is **not measured**
@@ -302,6 +338,7 @@ command = "D:\\WIN_MCP\\reverse-mcp-python\\Scripts\\python.exe"
 args = ["D:\\Data\\Coding_Github\\Reverse\\reverse-skill\\skills\\scripts\\mcp\\anything-analyzer-stdio.py"]
 env_vars = ["ANYTHING_ANALYZER_MCP_TOKEN"]
 startup_timeout_sec = 120
+tool_timeout_sec = 120
 ```
 
 ```json
@@ -329,10 +366,10 @@ startup_timeout_sec = 120
 `REVERSE_MCP_BRIDGE_PYTHON`, else the first `python` on PATH, which is safe because the
 launcher is stdlib-only) instead of the `url` + `Authorization` header form. Set
 `REVERSE_MCP_BRIDGE_PYTHON=D:\WIN_MCP\reverse-mcp-python\Scripts\python.exe` before running it
-on this host to get the paths above verbatim. The two Codex-only keys (`env_vars`,
-`startup_timeout_sec`) are **not** written by bootstrap; add them by hand, otherwise Codex
-stays on its 10 s startup default (the token itself is covered by the launcher's `HKCU`
-fallback).
+on this host to get the paths above verbatim. The Codex-only keys (`env_vars`,
+`startup_timeout_sec`, `tool_timeout_sec`) are **not** written by bootstrap. Lazy
+initialization needs no cold-start timeout; allow enough `tool_timeout_sec` for
+the first demand. The token itself is covered by the launcher's `HKCU` fallback.
 
 Manual alternative (kept for a client without stdio or for debugging): the plain HTTP
 registration `{"type":"http","url":"http://127.0.0.1:23816/mcp","headers":{"Authorization":"Bearer ${ANYTHING_ANALYZER_MCP_TOKEN}"}}`

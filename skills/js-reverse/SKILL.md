@@ -166,7 +166,7 @@ description: 在使用 js-reverse-mcp 做前端 JavaScript 逆向时使用，适
 
 **上游入口**: `skills/SKILL.md`（总控）、`routing.md`
 **上游备选**:
-- anything-analyzer MCP（端口 23816）的浏览器工具可作为替代或补充。ACTION REQUIRED: start the backend via `skills/scripts/mcp/start-local-backend.ps1 -Backend AnythingAnalyzer` before using anything-analyzer tools（客户端若已按 `docs/mcp/host-deviations.md` 注册为 stdio 启动器 `anything-analyzer-stdio.py`，客户端启动时会自动拉起/复用应用，此步可省；两条路径都校验 `mcp-server-config.json`、复用健康实例、拒绝被其他进程占用的端口，从不杀进程）
+- anything-analyzer MCP（端口 23816）的浏览器工具可作为替代或补充。stdio 启动器 `anything-analyzer-stdio.py` 默认按需加载：需要时调用 `discover_tools`，读取返回的 schema 后通过 `call_tool` 的 `name` 和 `arguments` 调用原工具；首次网关调用才启动/复用 app。手动 HTTP 注册才需先执行 `skills/scripts/mcp/start-local-backend.ps1 -Backend AnythingAnalyzer`。启动仍校验配置、复用健康实例并保留既有进程，见 `docs/mcp/host-deviations.md`。
 - jshookmcp 可作为更强的浏览器/CDP/Hook/Network/SourceMap/AST 执行面
 - `reverse-engineering/SKILL.md`（如果目标不是前端 JS）
 
@@ -198,10 +198,10 @@ description: 在使用 js-reverse-mcp 做前端 JavaScript 逆向时使用，适
 # 安装并注册 jshookmcp；Codex 可替换为 Claude 或 Both
 powershell -File "<skill-root>\scripts\bootstrap-reverse.ps1" -Capability @('jshookmcp') -McpHostTarget Codex
 
-# 注册并启动 anything-analyzer
-powershell -File "<skill-root>\scripts\bootstrap-reverse.ps1" -Capability @('anything-analyzer') -StartServices -McpHostTarget Codex
+# 安装并注册按需 MCP 网关
+powershell -File "<skill-root>\scripts\bootstrap-reverse.ps1" -Capability @('anything-analyzer') -McpHostTarget Codex
 
-# 已安装后，每次需要 anything-analyzer 工具前按需拉起 / 复用后端（不会杀进程，端口被别的进程占用时拒绝）
+# 仅手动 HTTP 注册或明确需要预先启动时使用；默认 stdio 网关由首次工具调用启动
 powershell -NoProfile -ExecutionPolicy Bypass -File "<skill-root>\scripts\mcp\start-local-backend.ps1" -Backend AnythingAnalyzer -LogDir "$env:LOCALAPPDATA\reverse-skill\anything-analyzer" -WaitSeconds 90
 ```
 

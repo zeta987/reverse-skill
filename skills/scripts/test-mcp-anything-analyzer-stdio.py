@@ -12,6 +12,8 @@ on first use, network access for npx); otherwise only the built-in relay leg is 
 """
 
 from concurrent.futures import ThreadPoolExecutor
+import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -44,8 +46,9 @@ if os.environ.get('REVERSE_TEST_EARLY_EXIT') == '1':
     raise SystemExit(7)
 port = int(os.environ['REVERSE_TEST_PORT']); token = os.environ['REVERSE_TEST_TOKEN']
 name = os.environ.get('REVERSE_TEST_SERVER_NAME', 'anything-analyzer'); nonce = os.environ['REVERSE_TEST_NONCE']
-sessions = set(); lock = threading.Lock()
-TOOLS = [{'name': 'list_requests', 'description': 'fixture', 'inputSchema': {'type': 'object', 'properties': {}}}]
+sessions = set(); lock = threading.Lock(); requests = []
+TOOLS = [{'name': 'list_requests', 'description': 'fixture', 'inputSchema': {'type': 'object', 'properties': {}}, 'annotations': {'readOnlyHint': True}},
+         {'name': 'fixture_action', 'description': 'fixture action', 'inputSchema': {'type': 'object', 'properties': {'value': {'type': 'integer'}}, 'required': ['value']}}]
 class Handler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
     def log_message(self, *args): pass
@@ -63,7 +66,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(401, {'error': 'Unauthorized: invalid or missing token'}); return False
         return True
     def do_GET(self):
-        if self.path == '/owner': self._json(200, {'fixture': nonce, 'pid': os.getpid(), 'name': name, 'sessions': len(sessions)}); return
+        if self.path == '/owner': self._json(200, {'fixture': nonce, 'pid': os.getpid(), 'name': name, 'sessions': len(sessions), 'requests': requests}); return
         if self.path == '/shutdown':
             self._json(200, {'ok': True}); threading.Thread(target=self.server.shutdown, daemon=True).start(); return
         if not self._authorized(): return
@@ -84,6 +87,9 @@ class Handler(BaseHTTPRequestHandler):
         try: message = json.loads(raw)
         except ValueError: self._json(400, {'jsonrpc': '2.0', 'error': {'code': -32700, 'message': 'Parse error'}, 'id': None}); return
         frames = message if isinstance(message, list) else [message]
+        if os.environ.get('REVERSE_TEST_LAZY') == '1':
+            for frame in frames:
+                requests.append({'message': frame, 'session': self.headers.get('mcp-session-id'), 'protocol': self.headers.get('MCP-Protocol-Version')})
         sid = self.headers.get('mcp-session-id', '')
         is_init = any(f.get('method') == 'initialize' for f in frames)
         if sid:
@@ -101,7 +107,15 @@ class Handler(BaseHTTPRequestHandler):
             if method == 'initialize':
                 responses.append({'jsonrpc': '2.0', 'id': rid, 'result': {'protocolVersion': frame.get('params', {}).get('protocolVersion', '2025-03-26'), 'capabilities': {'tools': {'listChanged': False}}, 'serverInfo': {'name': name, 'version': '1.0.0'}}})
             elif method == 'tools/list':
-                responses.append({'jsonrpc': '2.0', 'id': rid, 'result': {'tools': TOOLS}})
+                if os.environ.get('REVERSE_TEST_LAZY') == '1':
+                    page = frame.get('params', {}).get('cursor')
+                    result = {'tools': TOOLS[1:]} if page == 'second' else {'tools': TOOLS[:1], 'nextCursor': 'second'}
+                else: result = {'tools': TOOLS[:1]}
+                responses.append({'jsonrpc': '2.0', 'id': rid, 'result': result})
+            elif method == 'tools/call':
+                if frame.get('params', {}).get('name') == 'fail_transport':
+                    self._json(500, {'secret': token}); return
+                responses.append({'jsonrpc': '2.0', 'id': rid, 'result': {'content': [{'type': 'text', 'text': 'fixture'}, {'type': 'image', 'data': 'AA==', 'mimeType': 'image/png'}], 'structuredContent': frame['params'], 'isError': True}})
             elif method == 'ping':
                 responses.append({'jsonrpc': '2.0', 'id': rid, 'result': {}})
             else:
@@ -224,10 +238,10 @@ def start_direct_fixture(port, token, name):
 
 def launcher_command(port, config, log_dir, proxy='relay', extra=()):
     return [sys.executable, '-I', str(launcher), '--port', str(port), '--repo', str(fake_repo), '--pnpm', str(stub_pnpm),
-            '--config', str(config), '--log-dir', str(log_dir), '--wait', '15', '--proxy', proxy, *extra]
+            '--config', str(config), '--log-dir', str(log_dir), '--wait', '15', *(['--proxy', proxy] if proxy else []), *extra]
 
 
-def run_launcher(port, config, log_dir, proxy='relay', extra=(), env_extra=None, stdin_frames=None, timeout=60, expect_frames=0):
+def run_launcher(port, config, log_dir, proxy='relay', extra=(), env_extra=None, stdin_frames=None, timeout=60, expect_frames=0, repair_config=None):
     """Run the launcher as a client would: stdin = JSON-RPC frames, stdout = MCP channel, stderr = diagnostics.
 
     A real client keeps stdin open while it waits for answers; mcp-remote forwards
@@ -256,6 +270,11 @@ def run_launcher(port, config, log_dir, proxy='relay', extra=(), env_extra=None,
                 process.stdin.flush()
                 wait_for(1, deadline)
                 frames_in = frames_in[1:]
+            if repair_config:
+                process.stdin.write((json.dumps(frames_in.pop(0)) + '\n').encode('utf-8'))
+                process.stdin.flush()
+                wait_for(2, deadline)
+                repair_config()
             process.stdin.write(''.join(json.dumps(frame) + '\n' for frame in frames_in).encode('utf-8'))
             process.stdin.flush()
             if expect_frames:
@@ -297,6 +316,51 @@ def assert_refused(result, needle, label):
 
 report = {'status': 'FAIL', 'artifacts': str(root)}
 try:
+    # Import-level guards prove even registry/token/config/socket helpers stay untouched.
+    spec = importlib.util.spec_from_file_location('aa_launcher', launcher)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    def forbidden(*args, **kwargs):
+        raise AssertionError('local gateway request touched backend startup')
+    module.repair_environment = module.token_candidates = module.ensure_backend = module.port_open = module.mcp_post = forbidden
+    local_frames = SMOKE + [
+        {'jsonrpc': '2.0', 'id': 4, 'method': 'ping'},
+        {'jsonrpc': '2.0', 'id': 5, 'method': 'tools/call', 'params': {'name': 'unknown', 'arguments': {}}},
+        {'jsonrpc': '2.0', 'id': 6, 'method': 'tools/call', 'params': {'name': 'call_tool', 'arguments': {'name': 'x', 'arguments': []}}},
+        {'jsonrpc': '2.0', 'id': 7, 'method': 'tools/call', 'params': {'name': 'discover_tools', 'arguments': {'extra': True}}},
+        {'jsonrpc': '2.0', 'id': 8, 'method': 'tools/list', 'params': []},
+        {'jsonrpc': '2.0', 'id': True, 'method': 'ping'},
+        {'jsonrpc': '2.0', 'id': 9, 'method': 'tools/call', 'params': {'name': 'call_tool', 'arguments': {'name': '', 'arguments': {}}}},
+        {'jsonrpc': '2.0', 'method': 'tools/call', 'params': {'name': 'discover_tools', 'arguments': {}}},
+        [], {'id': 10, 'method': 'ping'},
+        {'jsonrpc': '2.0', 'id': 20, 'method': 'ping', 'params': {'_meta': {}}},
+        {'jsonrpc': '2.0', 'id': 21, 'method': 'tools/list', 'params': {'_meta': {'progressToken': 'catalog'}}},
+        {'jsonrpc': '2.0', 'method': 'notifications/initialized', 'params': {'_meta': {}}},
+        {'jsonrpc': '2.0', 'id': 22, 'method': 'ping', 'params': {'_meta': []}},
+        {'jsonrpc': '2.0', 'id': 23, 'method': 'tools/list', 'params': {'_meta': None}},
+        {'jsonrpc': '2.0', 'id': 24, 'method': 'ping', 'params': {'extra': True}},
+        {'jsonrpc': '2.0', 'id': 25, 'method': 'notifications/initialized', 'params': {'_meta': []}},
+        {'jsonrpc': '2.0', 'id': 26, 'method': 'tools/call', 'params': {'name': 'discover_tools', 'arguments': {}, '_meta': []}},
+    ]
+    saved_stdin = sys.stdin
+    read_fd, write_fd = os.pipe()
+    try:
+        sys.stdin = io.TextIOWrapper(io.BytesIO((''.join(json.dumps(f) + '\n' for f in local_frames) + '{bad\n').encode()))
+        args = module.parse_args(['--config', str(root / 'missing.json')])
+        assert args.proxy == 'lazy', 'default proxy must defer backend startup'
+        assert module.run_lazy(args, write_fd) == 0
+        os.close(write_fd)
+        local_replies = [json.loads(line) for line in os.fdopen(read_fd).read().splitlines()]
+    finally:
+        sys.stdin = saved_stdin
+    assert [t['name'] for t in local_replies[2]['result']['tools']] == ['discover_tools', 'call_tool']
+    assert local_replies[1]['error']['code'] == -32601
+    by_local_id = {r.get('id'): r for r in local_replies}
+    assert by_local_id[20].get('result') == {}, 'valid ping _meta must stay local'
+    assert by_local_id[21].get('result', {}).get('tools') == by_local_id[3]['result']['tools'], 'valid tools/list _meta must stay local'
+    assert [r['error']['code'] for r in local_replies[4:] if 'error' in r] == [-32602, -32602, -32602, -32602, -32600, -32602, -32600, -32600, -32602, -32602, -32602, -32602, -32602, -32700], local_replies
+    report['local_gateway'] = 'PASS (no token/config/registry/socket/startup access)'
+
     config = root / 'mcp-server-config.json'
     port = free_port()
     validation_log = root / 'logs-validation'
@@ -513,6 +577,61 @@ try:
         report['restricted_environment'] = {'repaired': repaired_env['repaired'], 'check_only_exit': restricted.returncode}
     else:
         report['restricted_environment'] = 'SKIPPED (Windows only)'
+
+    # Default local handshake, even absent token/config, never starts the fixture.
+    lazy_port = free_port()
+    lazy_config = root / 'lazy-config.json'
+    lazy_log = root / 'logs-lazy'
+    before = marker_count()
+    idle = run_launcher(lazy_port, lazy_config, lazy_log, proxy=None, stdin_frames=SMOKE,
+                        env_extra={'ANYTHING_ANALYZER_MCP_TOKEN': ''}, expect_frames=3)
+    assert idle['exit_code'] == 0 and marker_count() == before and not lazy_log.exists(), idle
+    assert [t['name'] for t in idle['frames'][2]['result']['tools']] == ['discover_tools', 'call_tool']
+    assert run_launcher(lazy_port, lazy_config, lazy_log, proxy=None)['exit_code'] == 0
+    assert marker_count() == before, 'EOF started the backend'
+
+    discover = {'jsonrpc': '2.0', 'id': 10, 'method': 'tools/call', 'params': {'name': 'discover_tools', 'arguments': {}, '_meta': {'progressToken': 'catalog'}}}
+    backend_params = {'name': 'fixture_action', 'arguments': {'value': 42, 'nested': {'x': [1, 2]}}}
+    invoke = {'jsonrpc': '2.0', 'id': 11, 'method': 'tools/call', 'params': {'name': 'call_tool', 'arguments': backend_params, '_meta': {'progressToken': 'action'}}}
+    transport_fail = {'jsonrpc': '2.0', 'id': 12, 'method': 'tools/call', 'params': {'name': 'call_tool', 'arguments': {'name': 'fail_transport', 'arguments': {}}}}
+    # First demand fails on missing config; repair it while this bridge remains alive.
+    fixture_ports.append(lazy_port)
+    lazy = run_launcher(lazy_port, lazy_config, lazy_log, proxy=None,
+                        env_extra={'REVERSE_TEST_LAZY': '1'},
+                        stdin_frames=[SMOKE[0], discover, discover, invoke, transport_fail], expect_frames=5,
+                        repair_config=lambda: write_config(lazy_config, lazy_port))
+    assert lazy['exit_code'] == 0, lazy
+    first = lazy['frames'][1]['result']
+    assert first['isError'] is True and 'config' in first['content'][0]['text'].lower(), first
+    tools = json.loads(lazy['frames'][2]['result']['content'][0]['text'])['tools']
+    assert [t['name'] for t in tools] == ['list_requests', 'fixture_action'] and tools[0]['annotations'] == {'readOnlyHint': True}, tools
+    assert tools[1]['inputSchema']['required'] == ['value']
+    assert lazy['frames'][3]['result'] == {'content': [{'type': 'text', 'text': 'fixture'}, {'type': 'image', 'data': 'AA==', 'mimeType': 'image/png'}], 'structuredContent': {**backend_params, '_meta': {'progressToken': 'action'}}, 'isError': True}, lazy
+    assert lazy['frames'][4]['result']['isError'] is True
+    assert test_token not in lazy['stdout'] + lazy['stderr'], 'HTTP body/token leaked'
+    assert marker_count() == before + 1 and len(list(lazy_log.glob('*.process.json'))) == 1
+    traffic = http_get(lazy_port, '/owner')['requests']
+    initialized = [r for r in traffic if r['message']['method'] == 'initialize']
+    assert len(initialized) == 2 and initialized[-1]['message']['params']['capabilities'] == {}, traffic
+    session = next(r['session'] for r in traffic if r['message']['method'] == 'notifications/initialized')
+    active = [r for r in traffic if r['message']['method'] != 'initialize']
+    assert all(r['session'] == session and r['protocol'] == '2025-03-26' for r in active), traffic
+    assert sum(r['message']['method'] == 'tools/list' for r in active) == 2, traffic
+    assert all(r['message']['params'].get('_meta') == {'progressToken': 'catalog'} for r in active if r['message']['method'] == 'tools/list'), traffic
+    assert sum(r['message'].get('params', {}).get('name') == 'fail_transport' for r in active) == 1, 'possibly executed action was replayed'
+
+    lazy_multi_port = free_port()
+    lazy_multi_config = root / 'lazy-multi-config.json'
+    write_config(lazy_multi_config, lazy_multi_port)
+    fixture_ports.append(lazy_multi_port)
+    with ThreadPoolExecutor(3) as pool:
+        lazy_multi = list(pool.map(lambda _: run_launcher(lazy_multi_port, lazy_multi_config, root / 'logs-lazy-multi',
+                                                        proxy='lazy', env_extra={'REVERSE_TEST_LAZY': '1'},
+                                                        stdin_frames=[SMOKE[0], discover, invoke], expect_frames=3), range(3)))
+    assert all(r['exit_code'] == 0 and not r['frames'][1]['result'].get('isError') for r in lazy_multi), lazy_multi
+    assert marker_count() == before + 2, 'concurrent lazy bridges started more than one backend'
+    assert len(list((root / 'logs-lazy-multi').glob('*.process.json'))) == 1
+    report['lazy_gateway'] = {'idle_starts': 0, 'repair_retry_starts': 1, 'paginated_tools': len(tools), 'concurrent_bridges': 3, 'concurrent_starts': 1, 'transport_replays': 0}
 
     report['status'] = 'PASS'
     report['fixture_only'] = True

@@ -51,7 +51,7 @@ is not automatically a Streamable HTTP MCP endpoint.
 | IDA GUI | Open IDA and start its installed MCP plugin | The proxy only; plugin initialization may only register a hotkey |
 | GhydraMCP | Open an enabled CodeBrowser tool and a project/program, then verify instance discovery | The Python bridge and its local discovery loop |
 | x64dbg | Launch the debugger with the installed matching `.dp64`/`.dp32` plugin; an empty debugger is sufficient for a health check | The Python bridge only |
-| Anything Analyzer | Registered as the stdio launcher `anything-analyzer-stdio.py`: the client spawns it, it validates `mcp-server-config.json`, runs `pnpm dev` detached in the pinned checkout, waits for an authenticated `initialize` on `127.0.0.1:23816/mcp` and then proxies stdio to it (pinned `mcp-remote`, or its built-in relay). `start-local-backend.ps1 -Backend AnythingAnalyzer` is the same start without a proxy | With the stdio shape: the app itself, on demand. With the manual HTTP+Bearer shape: nothing, the client reports connection refused until the app runs |
+| Anything Analyzer | The stdio launcher `anything-analyzer-stdio.py` defaults to a lazy gateway. The agent calls `discover_tools` when analysis is needed, then `call_tool` with an advertised backend name and arguments. First demand validates config and starts/reuses the authenticated backend on `127.0.0.1:23816/mcp`. `start-local-backend.ps1 -Backend AnythingAnalyzer` remains an explicit manual start | Only the lightweight gateway on client initialization; the desktop app starts on the first gateway tool call |
 | Pentest Swarm AI | Registered as the stdio launcher `pentestswarm-stdio.py`: the client spawns it, it validates `%USERPROFILE%\.pentestswarm\config.yaml` (provider `ollama`, no key), hands the relay key from the User environment to the child (providers `claude`/`openai`; for `claude` also `ANTHROPIC_BASE_URL`, child only), or brings up `ollama serve` on `127.0.0.1:11434` (provider `ollama`), then runs `pentestswarm mcp serve` on the same stdio; `--ensure-api-server` / `--redis-port 6379` add the `pentestswarm serve` (health `GET 127.0.0.1:8080/api/v1/health`) and Redis legs that only `doctor` wants. `start-local-backend.ps1 -Backend PentestSwarm` is that full chain without the MCP child | With the stdio shape: Ollama and the engine, on demand. A bare `pentestswarm mcp serve` entry starts the engine without Ollama and fails at the first tool call |
 | math | No separate GUI/backend | The complete MCP server |
 
@@ -77,9 +77,13 @@ Its health probe is a Streamable HTTP `initialize` with
 reported as the reason the occupied port was refused. For the clients themselves
 the registered entry is the stdio launcher
 [`anything-analyzer-stdio.py`](../../skills/scripts/mcp/anything-analyzer-stdio.py)
-(standard-library Python; same validation, same named mutex, detached `pnpm dev`,
-then a `mcp-remote` or built-in relay proxy leg), so a client start brings the
-app up without a manual step. The runbook, the four client shapes, the host
+(standard-library Python; local handshake and two gateway tools). Call
+`discover_tools` only when the task needs Anything Analyzer, inspect the returned
+schemas, then call `call_tool` with `name` and `arguments`. Backend tool results,
+including images and structured content, pass through unchanged. Normal client
+startup does not probe or start the app. Explicit `--proxy relay` or
+`--proxy mcp-remote` retains eager startup and the native backend tool catalog.
+The runbook, the four client shapes, the host
 evidence and the known upstream limitation are in
 [host-deviations.md](host-deviations.md). `-Backend PentestSwarm` and
 [`pentestswarm-stdio.py`](../../skills/scripts/mcp/pentestswarm-stdio.py) follow the

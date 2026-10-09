@@ -999,7 +999,7 @@ function Get-ReverseMcpBridgePython {
 function Get-AnythingAnalyzerMcpServerDefinition {
     param([Parameter(Mandatory = $true)]$Definition)
 
-    # stdio launcher: the client spawns it, it starts/reuses the app and proxies to mcpUrl.
+    # Lazy stdio gateway: client initialization stays local; first tool demand starts/reuses the app.
     # No url, headers or token in the client config; the token stays in the User environment
     # (ANYTHING_ANALYZER_MCP_TOKEN), which the launcher reads itself.
     if (-not $Definition.PSObject.Properties['mcpBridgeLauncher'] -or [string]::IsNullOrWhiteSpace([string]$Definition.mcpBridgeLauncher)) {
@@ -1318,7 +1318,7 @@ function Ensure-Capability {
                 catch {
                     Write-Warning "Could not persist ANYTHING_ANALYZER_MCP_TOKEN for future MCP clients: $($_.Exception.Message)"
                 }
-                # stdio shape: the launcher starts/reuses the app and bridges to mcpUrl; the
+                # stdio shape: the gateway starts/reuses the app on the first tool call; the
                 # token stays in the User environment and never enters a client config.
                 $serverDefinition = Get-AnythingAnalyzerMcpServerDefinition -Definition $definition
                 Ensure-McpServer -ServerName 'anything-analyzer' -ServerDefinition $serverDefinition

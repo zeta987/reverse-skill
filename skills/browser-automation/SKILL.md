@@ -226,7 +226,7 @@ npm run doctor:network
 **上游入口**: `skills/SKILL.md`（总控）、`routing.md`
 **适用场景**: 任何需要自动化操作浏览器或桌面应用的任务
 **下游出口**:
-- 抓到的请求需要分析 → `anything-analyzer` 或 `js-reverse`（ACTION REQUIRED: start the backend via `skills/scripts/mcp/start-local-backend.ps1 -Backend AnythingAnalyzer` before using anything-analyzer tools）
+- 抓到的请求需要分析 → `anything-analyzer` 或 `js-reverse`（按需调用 stdio 网关 `discover_tools`，读取 schema 后以 `call_tool` 传入工具 `name` 和 `arguments`；首次调用才启动/复用 app，手动 HTTP 注册才需 `start-local-backend.ps1 -Backend AnythingAnalyzer`）
 - 需要 JS 调试/Hook → `jshookmcp`
 - 需要还原签名算法 → `js-reverse`
 - 桌面应用是逆向工具 → `ida-reverse/`

@@ -182,7 +182,7 @@
       "canAutoInstall": true,
       "pinnedCommit": "0ed4791688e5186da051c85eb7ddfe4639e14fd2",
       "verificationMode": "service-or-registration",
-      "note": "客户端以 stdio 注册：<bridge-python> skills/scripts/mcp/anything-analyzer-stdio.py（标准库即可，REVERSE_MCP_BRIDGE_PYTHON 可指定解释器）。启动器按需拉起 pnpm dev（分离进程、命名互斥量）、用 ANYTHING_ANALYZER_MCP_TOKEN 做 initialize 健康检查，再以 pinned mcp-remote 或内置 relay 桥接到 mcpUrl；token 只存在于 User 环境变量，不写入客户端配置。mcpUrl + Bearer 仍可作为手动 HTTP 注册方式（见 docs/mcp/host-deviations.md）。"
+      "note": "客户端以 stdio 注册：<bridge-python> skills/scripts/mcp/anything-analyzer-stdio.py（标准库即可，REVERSE_MCP_BRIDGE_PYTHON 可指定解释器）。默认 lazy 网关在 initialize/tools/list 时仅回覆本地入口；需要时调用 discover_tools，再以 call_tool 传入原工具 name 和 arguments。首次网关调用才拉起/复用 pnpm dev（分离进程、命名互斥量），保留 ANYTHING_ANALYZER_MCP_TOKEN 健康检查；token 不写入客户端配置。显式 --proxy relay/mcp-remote 保留 eager 直通，mcpUrl + Bearer 可手动 HTTP 注册（见 docs/mcp/host-deviations.md）。"
     },
     {
       "name": "idapro",
