@@ -65,6 +65,8 @@ burp-mcp-full/build/classes/
 burp-mcp-full/build/libs/
 burp-mcp-full/lib/
 burp-mcp-full/.gradle/
+# IDE (VS Code / Eclipse Java) output; duplicates src/main/resources and build/classes
+burp-mcp-full/bin/
 *.class
 *.jar
 !burp-mcp-full/build/libs/burp-mcp-full.jar
