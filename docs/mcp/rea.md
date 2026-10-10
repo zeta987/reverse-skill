@@ -203,7 +203,11 @@ gitignored. Use a short-lived branch (`dev/rea-<new-version>`), never commit fro
    `pwsh -NoProfile -File skills/scripts/update-rea.ps1 -Version <new> -Mode Tracked -ContractReport $env:TEMP\rea-contract\<new>-report.json -Note "<why>"`.
    Review `git diff` (manifests, ToolDiscovery, RULES rows, SKILL paragraph, ops/references
    docs, this file). Adjust the SKILL paragraphs and the provider decisions above by hand if
-   the CHANGELOG changed behaviour the paragraphs describe. Commit (`chore(mcp): bump rea to <new>`).
+   the CHANGELOG changed behaviour the paragraphs describe. Commit (`chore(mcp): bump rea to <new>`),
+   then after the branch is fast-forwarded into the integration branch tag that commit
+   `rs<reverse-skill VERSION>-rea<new>` (annotated, signed per `tag.gpgSign`; e.g.
+   `rs1.0.1-rea6.3.0`) so the fork's own version and the rea pin are readable from `git tag`.
+   Push the tag together with the branch. Upstream's `v<VERSION>` tags are never moved or reused.
 4. **Apply to the mirrors** (local, not committed):
    `pwsh -NoProfile -File skills/scripts/update-rea.ps1 -Version <new> -Mode Apply -ContractReport $env:TEMP\rea-contract\<new>-report.json`.
    It refuses without a passing report for exactly that version.
