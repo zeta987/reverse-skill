@@ -243,3 +243,4 @@ Local readiness reports and machine-specific configurations belong in ignored
 or silently activate a different client's configuration.
 
 Machine-specific install deviations and the backend runbook for this fork live in [host-deviations.md](host-deviations.md).
+The rea (reverse-engineer-anything) backend has its own runbook, including the version bump and rollback procedure: [rea.md](rea.md).

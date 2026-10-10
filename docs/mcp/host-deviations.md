@@ -77,7 +77,7 @@ Status after the 2026-10-08 fork fixes (branch `dev/windows-mcp-clients`):
 | ghidra-mcp | manifest describes the GhydraMCP path (user extension, loopback patch, `ghydra-stdio.py`, REST from 8192) instead of LaurieWired 8765 |
 | pentestswarm | manifest `mcpBridgeLauncher: %SKILL_ROOT%\scripts\mcp\pentestswarm-stdio.py`, `servicePort: 8080`, note rewritten for the free local stack (provider `ollama`, no API key); `start-local-backend.ps1 -Backend PentestSwarm`; runbook and client shapes below. Bootstrap does not write the entry (the parent registers by hand) |
 | agent-browser | manifest `postInstall: agent-browser install`, `installDir: %USERPROFILE%\.agent-browser\browsers`, `docsUrl` → vercel-labs; `browser-automation/scripts/setup.ps1` runs `agent-browser install` instead of `npx playwright install chromium`; the `playwright` tool-index row also accepts `~\.agent-browser\browsers` as evidence. The Kali manifest and the POSIX bootstrap keep the old command (not verified here) |
-| rea | manifest capability `rea` (`npm-mcp`, `mcpNames: [rea]`, `pinnedVersion 6.1.0`) in both manifests (the Kali parity check in `verify-routing-coherence.ps1` requires it; the POSIX/Kali bootstrap scripts have no `rea` handler, not verified here); `refresh-tool-index.ps1` capability list + `ToolDiscovery.ps1` catalog row (`FixedVersion rea-agents@6.1.0`, Ready = registered + npx); `tool-index.md.template` row; RULES / RULES_zh / skills SKILL capability lists (27); ACTION REQUIRED "rea 可用" paragraphs in `js-reverse`, `dotnet-reverse`, `macos-reverse`, `apk-reverse`, `browser-extension-reverse`; `ops/evidence-finding-path.md` section 5.2 bundle import; runbook below |
+| rea | manifest capability `rea` (`npm-mcp`, `mcpNames: [rea]`, `pinnedVersion 6.1.0`) in both manifests (the Kali parity check in `verify-routing-coherence.ps1` requires it; the POSIX/Kali bootstrap scripts have no `rea` handler, not verified here); `refresh-tool-index.ps1` capability list + `ToolDiscovery.ps1` catalog row (`FixedVersion rea-agents@6.1.0`, Ready = registered + npx); `tool-index.md.template` row; RULES / RULES_zh / skills SKILL capability lists (27); ACTION REQUIRED "rea 可用" paragraphs in `js-reverse`, `dotnet-reverse`, `macos-reverse`, `apk-reverse`, `browser-extension-reverse`; `ops/evidence-finding-path.md` section 5.2 bundle import; runbook in [rea.md](rea.md) |
 
 Registration scope: `bootstrap-reverse.ps1 -McpHostTarget Claude|Codex|Antigravity|Both|All`
 now writes the project-scope files listed below (`-McpScope Project`, default). Claude Code
@@ -734,109 +734,21 @@ config through `$HOME/.pentestswarm` only when viper can resolve a home director
 the `scan_target`/`quick_recon` tools run real recon tooling against whatever target the client
 names.
 
-### REA (rea-agents 6.1.0, package runner, no local install)
+### REA (rea-agents, package runner, no local install)
 
-[morluto/rea](https://github.com/morluto/rea) is one stdio MCP server + CLI that returns
-Evidence-bearing results (`observed` / `derived` / `inferred`, `limitations[]`, residual
-unknowns) for JavaScript/Electron trees and ASARs, managed PE/CLI assemblies, archive and
-package inventories (ZIP/APK/IPA/MSIX/AppX/DMG), passive CDP page inspection and controlled
-browser scenarios, HAR/mitmproxy captures, EVM bytecode and, through providers, native
-binaries. It deliberately has **no scope/permission gate** (upstream `docs/roadmap.md`,
-PR #555); the authorization gate stays in this repository (`case-init` → `scope.md`). Local
-source checkout for reading: `D:\Data\Coding_Github\Reverse\rea` (6.1.0, matches npm `latest`).
-
-Verified on 2026-10-09 (Node 24.20.0, npm 12.2.0), read-only and without `rea setup`:
-
-| Fact | Evidence |
-|---|---|
-| `npx -y rea-agents@6.1.0 --version` | `6.1.0` (package now cached under `%APPDATA%\npm-cache\_npx`) |
-| `rea setup --client claude_code --dry-run --json` | `status: planned`; would update **user-global** `%USERPROFILE%\.claude.json` with command `"cmd.exe" "/d" "/c" "npx" "-y" "rea-agents@6.1.0" "mcp"` (backup `.claude.json.rea.backup`) and install the skill to `%USERPROFILE%\.agents\skills\reverse-engineer-anything`. **Not applied** |
-| `rea doctor --json` | exit 1 by design: `hopper` missing (Windows unsupported), `ghidra` `GHIDRA_INSTALL_DIR` unset (12.1.x required), `ida-registration` `REA_IDA_MCP_CONFIG` unset, `skill:identity` missing, every client registration `missing`/`config_drift`. Doctor reads only the user-global client files, so under this project-scope layout it will **always** report drift; use `claude mcp list` as the connection evidence instead. Catalog identity: 94 CLI commands, **138 MCP tools**, 6 prompts, `tools_sha256 35487b43394b2482fb84d37ab7fb20c0315671f40a49c4c39b8d048a2c3db5a6` |
-| stdio handshake `node.exe npx-cli.js -y rea-agents@6.1.0 mcp` | `initialize` answered in about 1 s (`serverInfo rea 6.1.0`, protocol `2025-06-18`), `tools/list` 138 tools in one frame of about 2.4 MB, `server/discover` → `-32601`, `ping` → `{}`, `prompts/list` 6 prompts, `resources/list` → `-32601`, nothing on stderr |
-| `binary_session {}` on this host | 62 tools available target-free; 76 unavailable: 57 `target_required` (native tools, unlocked by `open_binary`), **Android** `inspect_android_package` / `inspect_android_class` / `inspect_android_method` / `search_android_classes` / `trace_android_references` = `unsupported_host` ("JADX subprocess ownership is unsupported on win32"), **macOS native** `inspect_macho` / `inspect_plist` / `inspect_signature` / `list_architectures` / `inspect_asset_catalog` / `demangle_swift` / `observe_native_*` / `capture_native_ui_scenario` = `unsupported_host`, `capture_process_scenario` = `unsupported_host` (Linux/macOS only), `extract_firmware` / `inspect_firmware_regions` (Binwalk/Unblob, Linux), `inspect_binary_layout` / `inspect_recorded_crash` (pwntools, Linux x64), `inspect_evm_interface` (Linux x64), `recover_javascript_sources` (Wakaru, Linux x64), `get_navigation_context` = `provider_missing` |
-
-What works target-free on Windows and is pointed at from the skills: `analyze_javascript_application`,
-`trace_application_feature`, `compare_application_versions`, `inspect_managed_artifact`,
-`inspect_managed_members`, `project_managed_application_graph`, `open_binary` → `inspect_artifact`
-→ `project_android_application_graph` / `project_apple_application_graph`, `list_browser_targets`,
-`inspect_web_page`, `analyze_web_bundle`, `observe_web_session`, `capture_browser_scenario`,
-`inspect_web_network_capture`, `export_web_scripts`, `export_evidence_bundle` /
-`import_evidence_bundle` / `get_evidence_bundle`.
-
-Provider decisions (all three stay unconfigured; `doctor` keeps reporting them red):
-
-- **Hopper**: macOS/Linux only; setup "Hopper installation remains unavailable on Windows".
-- **Ghidra**: REA accepts Ghidra **12.1.x** only and would want `GHIDRA_INSTALL_DIR`/`JAVA_HOME`
-  in the server environment. This host runs 12.0.2 with the loopback-patched GhydraMCP JAR
-  (section above) and must not upgrade, so the env is not set and `Ghidra-mcp` remains the
-  Ghidra path.
-- **IDA**: REA's provider reuses an mrexodia/ida-pro-mcp registration (`REA_IDA_MCP_CONFIG`) and
-  the modern headless profile needs the `idalib_supervisor` API that the installed
-  ida-pro-mcp 2.0.0 does not have; the legacy profile would attach to the same
-  `127.0.0.1:13337` backend that `ida-pro-mcp` already proxies. Double registration of one
-  backend is what `docs/mcp/codex.md` warns against, so it is skipped.
-
-Registration shapes (repo = `D:\Data\Coding_Github\Reverse\reverse-skill`; no env, no token,
-no provider variables). The `node.exe` + `npx-cli.js` form is used instead of rea's own
-`cmd.exe /d /c npx` because a quoted `C:\Program Files\nodejs\npx.cmd` under `cmd.exe` is the
-quote-stripping case documented for the anything-analyzer proxy leg; the manifest keeps the
-portable `npx` vector and bootstrap would render `cmd /c npx` (not used here):
-
-```json
-// .mcp.json (Claude Code) — "rea" added to .claude/settings.local.json enabledMcpjsonServers
-"rea": {
-  "type": "stdio",
-  "command": "C:\\Program Files\\nodejs\\node.exe",
-  "args": ["C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npx-cli.js", "-y", "rea-agents@6.1.0", "mcp"]
-}
-```
-
-```json
-// .agents/mcp_config.json (Antigravity) — no type, no cwd
-"rea": {
-  "command": "C:\\Program Files\\nodejs\\node.exe",
-  "args": ["C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npx-cli.js", "-y", "rea-agents@6.1.0", "mcp"]
-}
-```
-
-```yaml
-# .dsh/agent-presets/reverse-skill/agent.cordis.yml (dsh web) — server/discover is -32601 natively
-- id: mcp-rea
-  name: "@deepseek-ai/dsh-mcp-client"
-  config:
-    serverName: rea
-    transport: stdio
-    command: C:\Program Files\nodejs\node.exe
-    args:
-      - C:\Program Files\nodejs\node_modules\npm\bin\npx-cli.js
-      - -y
-      - rea-agents@6.1.0
-      - mcp
-    cwd: D:\Data\Coding_Github\Reverse\reverse-skill
-```
-
-```toml
-# .codex/config.toml (Codex) — added 2026-10-10; verified with `codex mcp get rea` and a headless
-# `codex exec` run that called analyze_javascript_application + trace_application_feature.
-[mcp_servers."rea"]
-command = 'C:\Program Files\nodejs\node.exe'
-args = ['C:\Program Files\nodejs\node_modules\npm\bin\npx-cli.js', '-y', 'rea-agents@6.1.0', 'mcp']
-startup_timeout_sec = 90
-tool_timeout_sec = 300
-enabled = true
-```
-
-Operational notes: the first spawn after an npx-cache purge downloads the package inside the
-client's startup timeout (Claude Code about 30 s; the cache is warm now); `close_binary` clears
-the session's Evidence ledger, so `export_evidence_bundle` into `work/<case>/evidence/rea/` first
-(`skills/ops/evidence-finding-path.md` section 5.2); `capture_browser_scenario` and the CDP tools
-only talk to a loopback CDP endpoint or an executable the caller names, and `scope.md` must be
-granted before any of them touch a target. Bump the pin in both manifests, the three client files,
-the RULES tables and the SKILL paragraphs together; `rea update` is not used because nothing is
-installed globally. `skills/scripts/test-bootstrap-manifest.sh` cannot run under this Git Bash
-(it runs a symlinked `bash` with `PATH` limited to its stub directory, so Git Bash cannot load its
-MSYS runtime DLLs: "error while loading shared libraries"; reproduced with a plain `echo` under the
-same PATH); the failure happens before any manifest check and is a host limitation, not a manifest defect.
+The rea runbook moved to [rea.md](rea.md): supported version and the single version
+authority, what works on this host and what reports `unsupported_host` / `provider_missing`,
+the Hopper/Ghidra/IDA provider decisions, the four registration shapes, both catalog hashes
+(rea `tools_sha256` vs the wire `tools_list_sha256`), the bump procedure
+(`check-rea-upstream.ps1` → `test-rea-contract.ps1` → `update-rea.ps1 -Mode Tracked` →
+`-Mode Apply` → reconnect → routing/coherence/smoke → strict case review) and the rollback.
+Deviations stay in the register above: the rea rows record that `rea setup` is not applied,
+that the registration is project-scope `node.exe` + `npx-cli.js`, and that no native provider
+is configured. `skills/scripts/test-bootstrap-manifest.sh` cannot run under this Git Bash (it
+runs a symlinked `bash` with `PATH` limited to its stub directory, so Git Bash cannot load its
+MSYS runtime DLLs: "error while loading shared libraries"; reproduced with a plain `echo` under
+the same PATH); the failure happens before any manifest check and is a host limitation, not a
+manifest defect.
 
 ### x64dbg
 
