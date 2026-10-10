@@ -150,6 +150,10 @@ jobs:
             echo "syntax OK: $f"
           done < <(git ls-files '*.sh')
 
+      - name: Kali pwntools discovery regression
+        shell: bash
+        run: bash kali/scripts/test-pwntools-discovery.sh
+
       - name: Client-neutral bootstrap/discovery (Bash)
         shell: bash
         run: bash skills/scripts/test-client-neutral-bootstrap.sh

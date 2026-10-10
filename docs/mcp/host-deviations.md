@@ -8,6 +8,45 @@ the manifest/bootstrap in the fork instead of working around it silently.
 Last verified: 2026-10-08 on Windows 11 (Python 3.14 system, uv 0.12, Node 24,
 Go 1.27, Gradle 9.3, JDK 21, VS Community 2026).
 
+## Upstream merge log
+
+### 2026-10-10 — merged `upstream/main` `cab634b` into `dev/windows-mcp-clients`
+
+Merge commit (`--no-ff`), 39 upstream commits since 2026-09-22. Upstream areas: Kali pwntools
+discovery (`kali/scripts/lib/tool-discovery.sh`, `kali/scripts/bootstrap-reverse.sh` preflight via `pwn`,
+new `kali/scripts/test-pwntools-discovery.sh`), pwntools version probe `pwn version` with a
+probe-local `PWNLIB_NOTERM=1` in `skills/scripts/refresh-tool-index.sh` (hardened
+`test-client-neutral-bootstrap.sh`), distro Ghidra launcher detection, `yara` in the Kali catalog,
+`verify-routing-coherence.ps1` gate "every `routing.json` route has a benchmark case", R40 benchmark
+cases, consent-gated `RULES.md` activation, portable `sed` in `test-bash-workflow.sh`, CI workflow
+tweaks, binwalk marked `manual` upstream.
+
+Only `skills/scripts/bootstrap-manifest.json` conflicted (two hunks); resolution at string level:
+
+| Hunk | Upstream | Kept | Why |
+|---|---|---|---|
+| binwalk | `bootstrapKind: manual`, `canAutoInstall: false`, `manualInstallHint` (cargo) | fork `cargo-install`, `cargoCrate: binwalk`, `pinnedVersion: 3.1.0`, `canAutoInstall: true` + note | recorded deviation above; the fork automates exactly what the upstream hint asks the user to type. `skills/tool-index.md.template` binwalk row restored to `✓ / cargo-install / apt-package` after the auto-merge took the upstream `✗ manual` row; the upstream CHANGELOG entry carries a fork footnote |
+| pwntools | `verifyCommand: pwn` (no note) | fork `verifyCommand: pwn` + the uv/Python 3.13 note (`uvPython` untouched) | same value both sides; the note documents the recorded deviation |
+
+Auto-merged and checked by hand: `kali/scripts/bootstrap-manifest.json` (upstream `verifyCommand: pwn`
+plus the fork `rea` capability and pentestswarm v0.2.31 pin), `kali/scripts/bootstrap-reverse.sh`
+(upstream pwntools preflight + fork v0.2.31 `go install`), `RULES.md` / `RULES_zh.md` (upstream consent
+gate + fork rows `rea`, `pentestswarm`, `Ghidra-mcp`, `burpsuite`, `ARTEX` and the 27-capability list
+with `rea`), `skills/scripts/refresh-tool-index.sh` (upstream `pwn version` probe + fork project-scope
+`.mcp.json` default), `skills/tool-index.md.template` (`rea` row kept), `CHANGELOG.md`, `README_AI.md`.
+The PowerShell catalog (`lib/ToolDiscovery.ps1`) was not touched by upstream; it keeps probing
+`~\.local\bin\pwn.exe` and does not run a version command for pwntools, so the upstream
+`PWNLIB_NOTERM` change has no Windows counterpart to reconcile. No deviation row in the table below changed.
+
+Verification on this host after the merge (all exit 0): `test-routing.ps1` 178/178,
+`verify-routing-coherence.ps1` (new route↔benchmark gate passes with the fork R3 keywords),
+`smoke.ps1` (12 parse / 9 routes), `refresh-tool-index.ps1` (pwntools → `~\.local\bin\pwn.exe`,
+binwalk → `~\.cargo\bin\binwalk.exe` 3.1.0, `rea` row present; "MCP 已注册" shows ✗ only because the
+gitignored `.mcp.json` does not exist in the merge worktree), `verify-doc-facts.ps1`,
+`test-client-neutral-bootstrap.ps1`, `test-bootstrap-mcp-writers.ps1` (71), `verify-repository-security.py`.
+Not run: `kali/scripts/test-pwntools-discovery.sh` and the bash suites (`test-client-neutral-bootstrap.sh`,
+`test-bootstrap-manifest.sh`) — Kali/POSIX only or the known Git Bash PATH-stub limitation.
+
 ## Deviations from the manifest (install batch 2026-10-08)
 
 | Capability | Manifest says | What was actually done | Why |
