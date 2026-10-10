@@ -103,7 +103,7 @@ still says `ghidraVersion=11.4.2`; Ghidra 12.0.2 loads it anyway (confirmed in
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File skills\scripts\mcp\start-ghidra-project.ps1 `
-  -GhidraRun D:\Programs\ReverseToolbox\ghidra_12.0.2_PUBLIC\ghidraRun.bat `
+  -GhidraRun <ghidra-install>\ghidraRun.bat `
   -ProjectPath <absolute .gpr> [-ProgramPath /<program>] -Port 8192
 ```
 
@@ -182,8 +182,8 @@ The owner does not open the app by hand: every client (Claude Code, Codex, Antig
 registers [`anything-analyzer-stdio.py`](../../skills/scripts/mcp/anything-analyzer-stdio.py)
 as a **stdio** server and the launcher brings the app up when the client spawns it. It is
 standard-library Python (the bridge venv's `mcp==1.6.0` has no Streamable HTTP client and is
-not imported), so the tested bridge interpreter `D:\WIN_MCP\reverse-mcp-python\Scripts\python.exe`
-(3.13) runs it. Behaviour, in order:
+not imported), so the tested bridge interpreter (`%MCP_PYTHON%` below: the dedicated MCP venv's
+`python.exe`, 3.13) runs it. Behaviour, in order:
 
 1. `fd 1` is duplicated and parked on stderr before anything else runs; nothing but the proxy
    leg can ever write to the MCP channel (tests assert empty stdout on every failure path).
@@ -279,15 +279,16 @@ start exceeds the client's limit, that client's first attempt fails and its next
 any other client) reuses the app the first attempt left running. Set the Codex timeout
 explicitly (below) and `MCP_TIMEOUT=90000` for Claude Code when the cold start matters.
 
-Shapes to paste (repo = `D:\Data\Coding_Github\Reverse\reverse-skill`, all four files
-gitignored; no `url`, no header, no token anywhere):
+Shapes to paste (`%SKILL_ROOT%` = `<repo>\skills` of the local clone, `%MCP_PYTHON%` = the
+`python.exe` of the dedicated MCP venv; substitute both literally, clients do not expand them; all
+four files gitignored; no `url`, no header, no token anywhere):
 
 ```json
 // .mcp.json (Claude Code) — keep "anything-analyzer" in .claude/settings.local.json enabledMcpjsonServers
 "anything-analyzer": {
   "type": "stdio",
-  "command": "D:\\WIN_MCP\\reverse-mcp-python\\Scripts\\python.exe",
-  "args": ["D:\\Data\\Coding_Github\\Reverse\\reverse-skill\\skills\\scripts\\mcp\\anything-analyzer-stdio.py"]
+  "command": "%MCP_PYTHON%",
+  "args": ["%SKILL_ROOT%\\scripts\\mcp\\anything-analyzer-stdio.py"]
 }
 ```
 
@@ -295,8 +296,8 @@ gitignored; no `url`, no header, no token anywhere):
 # .codex/config.toml (Codex). env_vars forwards the *name* only (Codex filters the child
 # environment; "Environment variables to allow and forward"); the launcher also falls back to HKCU.
 [mcp_servers.anything-analyzer]
-command = "D:\\WIN_MCP\\reverse-mcp-python\\Scripts\\python.exe"
-args = ["D:\\Data\\Coding_Github\\Reverse\\reverse-skill\\skills\\scripts\\mcp\\anything-analyzer-stdio.py"]
+command = "%MCP_PYTHON%"
+args = ["%SKILL_ROOT%\\scripts\\mcp\\anything-analyzer-stdio.py"]
 env_vars = ["ANYTHING_ANALYZER_MCP_TOKEN"]
 startup_timeout_sec = 120
 ```
@@ -304,8 +305,8 @@ startup_timeout_sec = 120
 ```json
 // .agents/mcp_config.json (Antigravity) — no cwd, no type, no token
 "anything-analyzer": {
-  "command": "D:\\WIN_MCP\\reverse-mcp-python\\Scripts\\python.exe",
-  "args": ["D:\\Data\\Coding_Github\\Reverse\\reverse-skill\\skills\\scripts\\mcp\\anything-analyzer-stdio.py"]
+  "command": "%MCP_PYTHON%",
+  "args": ["%SKILL_ROOT%\\scripts\\mcp\\anything-analyzer-stdio.py"]
 }
 ```
 
@@ -316,17 +317,17 @@ startup_timeout_sec = 120
   config:
     serverName: anything-analyzer
     transport: stdio
-    command: 'D:\WIN_MCP\reverse-mcp-python\Scripts\python.exe'
-    args: ['D:\Data\Coding_Github\Reverse\reverse-skill\skills\scripts\mcp\anything-analyzer-stdio.py']
-    cwd: 'D:\Data\Coding_Github\Reverse\reverse-skill\skills\scripts\mcp'
+    command: '%MCP_PYTHON%'
+    args: ['%SKILL_ROOT%\scripts\mcp\anything-analyzer-stdio.py']
+    cwd: '%SKILL_ROOT%\scripts\mcp'
 ```
 
 `bootstrap-reverse.ps1 -Capability anything-analyzer -McpHostTarget …` now writes the
 `command`/`args` part of this stdio shape (manifest `mcpBridgeLauncher`; interpreter from
 `REVERSE_MCP_BRIDGE_PYTHON`, else the first `python` on PATH, which is safe because the
 launcher is stdlib-only) instead of the `url` + `Authorization` header form. Set
-`REVERSE_MCP_BRIDGE_PYTHON=D:\WIN_MCP\reverse-mcp-python\Scripts\python.exe` before running it
-on this host to get the paths above verbatim. The two Codex-only keys (`env_vars`,
+`REVERSE_MCP_BRIDGE_PYTHON` to that interpreter before running it
+on this host to get the shapes above with the real paths filled in. The two Codex-only keys (`env_vars`,
 `startup_timeout_sec`) are **not** written by bootstrap; add them by hand, otherwise Codex
 stays on its 10 s startup default (the token itself is covered by the launcher's `HKCU`
 fallback).
@@ -565,16 +566,16 @@ under a Codex-style environment with `USERPROFILE`/`APPDATA`/`LOCALAPPDATA`/`PAT
 start plus `pentestswarm serve` are both fast on this host (the API server answered health
 within a second of the spawn), but set the Codex timeout explicitly anyway.
 
-Shapes to paste (repo = `D:\Data\Coding_Github\Reverse\reverse-skill`, all four files
-gitignored; no url, no key, no password anywhere — the relay key stays in the User environment
+Shapes to paste (`%SKILL_ROOT%` and `%MCP_PYTHON%` as in the anything-analyzer section above,
+substituted literally; all four files gitignored; no url, no key, no password anywhere — the relay key stays in the User environment
 and the launcher's `HKCU` fallback finds it even under Codex's filtered environment):
 
 ```json
 // .mcp.json (Claude Code) — add "pentestswarm" to .claude/settings.local.json enabledMcpjsonServers
 "pentestswarm": {
   "type": "stdio",
-  "command": "D:\\WIN_MCP\\reverse-mcp-python\\Scripts\\python.exe",
-  "args": ["D:\\Data\\Coding_Github\\Reverse\\reverse-skill\\skills\\scripts\\mcp\\pentestswarm-stdio.py"]
+  "command": "%MCP_PYTHON%",
+  "args": ["%SKILL_ROOT%\\scripts\\mcp\\pentestswarm-stdio.py"]
 }
 ```
 
@@ -582,16 +583,16 @@ and the launcher's `HKCU` fallback finds it even under Codex's filtered environm
 # .codex/config.toml (Codex). No env_vars needed: the launcher resolves every path from the
 # registry and never needs a token; startup_timeout_sec covers a cold `ollama serve`.
 [mcp_servers.pentestswarm]
-command = "D:\\WIN_MCP\\reverse-mcp-python\\Scripts\\python.exe"
-args = ["D:\\Data\\Coding_Github\\Reverse\\reverse-skill\\skills\\scripts\\mcp\\pentestswarm-stdio.py"]
+command = "%MCP_PYTHON%"
+args = ["%SKILL_ROOT%\\scripts\\mcp\\pentestswarm-stdio.py"]
 startup_timeout_sec = 120
 ```
 
 ```json
 // .agents/mcp_config.json (Antigravity) — no cwd, no type, no env
 "pentestswarm": {
-  "command": "D:\\WIN_MCP\\reverse-mcp-python\\Scripts\\python.exe",
-  "args": ["D:\\Data\\Coding_Github\\Reverse\\reverse-skill\\skills\\scripts\\mcp\\pentestswarm-stdio.py"]
+  "command": "%MCP_PYTHON%",
+  "args": ["%SKILL_ROOT%\\scripts\\mcp\\pentestswarm-stdio.py"]
 }
 ```
 
@@ -603,9 +604,9 @@ startup_timeout_sec = 120
   config:
     serverName: pentestswarm
     transport: stdio
-    command: 'D:\WIN_MCP\reverse-mcp-python\Scripts\python.exe'
-    args: ['D:\Data\Coding_Github\Reverse\reverse-skill\skills\scripts\mcp\pentestswarm-stdio.py']
-    cwd: 'D:\Data\Coding_Github\Reverse\reverse-skill\skills\scripts\mcp'
+    command: '%MCP_PYTHON%'
+    args: ['%SKILL_ROOT%\scripts\mcp\pentestswarm-stdio.py']
+    cwd: '%SKILL_ROOT%\scripts\mcp'
 ```
 
 Manual `doctor`/`serve` from a shell: `pentestswarm doctor` and `pentestswarm serve` find the
