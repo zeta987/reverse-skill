@@ -21,7 +21,7 @@ Go 1.27, Gradle 9.3, JDK 21, VS Community 2026).
 | pentestswarm | go-install `@v0.1.0` + MCP, "needs Claude/Ollama API key" | **Upgraded to v0.2.31** (`go install …@v0.2.31` on 2026-10-08, module version confirmed with `go version -m`; the binary still prints `version dev`); registered as the stdio launcher `pentestswarm-stdio.py` (see the runbook below); provider `openai` = the owner's OpenAI-compatible relay, key only in the User environment | v0.1.0 had no `openai` provider (claude/ollama/lmstudio only); v0.2.31 adds it. Manifest pin bumped to v0.2.31 in both manifests and the Kali bootstrap. `mcp serve` runs the swarm engine in-process and never opens Postgres or Redis; `doctor` only dials the ports |
 | idapro (HTTP) | register `http://127.0.0.1:13337/mcp` | Not registered; the stdio proxy `ida-pro-mcp` already targets the same backend | Double registration of one backend is what `docs/mcp/codex.md` warns against |
 | agent-browser (2026-10-09) | npm-global `agent-browser@0.31.1`, postInstall `npx playwright install chromium`, installDir `%LOCALAPPDATA%\ms-playwright` | `npm install -g` done by bootstrap; browsers installed with `agent-browser install` → Chrome for Testing 155.0.8059.39 in `%USERPROFILE%\.agent-browser\browsers` | npm 12 blocks the package's postinstall (`allowScripts`), which is harmless because the win32-x64 binary ships inside the package. `npx playwright install chromium` prompted for the `playwright` package and hung the non-interactive bootstrap; agent-browser 0.31 does not use `ms-playwright` at all |
-| rea (2026-10-09) | new `npm-mcp` capability `rea`: `npx -y rea-agents@6.1.0 mcp`; bootstrap would render `cmd /c npx ...`; `rea setup --client claude_code` itself would write `"cmd.exe" "/d" "/c" "npx" "-y" "rea-agents@6.1.0" "mcp"` into the user-global `%USERPROFILE%\.claude.json` and install its skill under `~\.agents\skills` | **Not installed globally, setup not applied.** Hand-registered project-scope only, as `node.exe` + `node_modules\npm\bin\npx-cli.js -y rea-agents@6.1.0 mcp` in `.mcp.json`, `.agents/mcp_config.json` and the dsh preset; Codex deliberately left out; providers (Hopper/Ghidra/IDA) left unconfigured | `rea setup` only knows user-global client files (it reports every project-scope layout as `missing`/`config_drift` forever); the `node.exe` form avoids the `cmd.exe` quote stripping already documented for the anything-analyzer proxy; `tools/list` is 138 tools / about 2.4 MB, which would load into every Codex turn; the Ghidra provider wants 12.1.x while this host must keep 12.0.2 + the loopback-patched GhydraMCP; the IDA provider would double-register the 127.0.0.1:13337 backend already served by `ida-pro-mcp` and needs a supervisor API that ida-pro-mcp 2.0.0 lacks |
+| rea (2026-10-09) | new `npm-mcp` capability `rea`: `npx -y rea-agents@6.1.0 mcp`; bootstrap would render `cmd /c npx ...`; `rea setup --client claude_code` itself would write `"cmd.exe" "/d" "/c" "npx" "-y" "rea-agents@6.1.0" "mcp"` into the user-global `%USERPROFILE%\.claude.json` and install its skill under `~\.agents\skills` | **Not installed globally, setup not applied.** Hand-registered project-scope only, as `node.exe` + `node_modules\npm\bin\npx-cli.js -y rea-agents@6.1.0 mcp` in `.mcp.json`, `.agents/mcp_config.json`, the dsh preset and, since 2026-10-10, `.codex/config.toml`; providers (Hopper/Ghidra/IDA) left unconfigured | `rea setup` only knows user-global client files (it reports every project-scope layout as `missing`/`config_drift` forever); the `node.exe` form avoids the `cmd.exe` quote stripping already documented for the anything-analyzer proxy; `tools/list` is 138 tools / about 2.4 MB, which loads into every Codex turn (measured headless run: 787k input tokens, 679k of them cached); the Ghidra provider wants 12.1.x while this host must keep 12.0.2 + the loopback-patched GhydraMCP; the IDA provider would double-register the 127.0.0.1:13337 backend already served by `ida-pro-mcp` and needs a supervisor API that ida-pro-mcp 2.0.0 lacks |
 
 Status after the 2026-10-08 fork fixes (branch `dev/windows-mcp-clients`):
 
@@ -52,7 +52,7 @@ this machine's absolute paths.
 
 | Client | File | Servers |
 |---|---|---|
-| Codex CLI | `.codex/config.toml` (project scope, repo is trusted) | ida-pro-mcp, Ghidra-mcp, x64dbg-mcp, math-mcp, r2mcp, jshook, xquik, anything-analyzer (stdio launcher, see below), pentestswarm (stdio launcher, see below). **No `rea`**: its 138-tool catalog would load into every Codex turn; add `[mcp_servers.rea]` by hand later if wanted (shape below) |
+| Codex CLI | `.codex/config.toml` (project scope, repo is trusted) | ida-pro-mcp, Ghidra-mcp, x64dbg-mcp, math-mcp, r2mcp, jshook, xquik, anything-analyzer (stdio launcher, see below), pentestswarm (stdio launcher, see below), rea (added 2026-10-10 after the headless flow test; the 138-tool catalog costs about 787k input tokens per turn, 679k cached) |
 | Claude Code | `.mcp.json` + `.claude/settings.local.json` (`enabledMcpjsonServers`) | the nine above plus `rea` (package runner, see below); every stdio entry carries `"type": "stdio"` |
 | Antigravity | `.agents/mcp_config.json` (`mcpServers`, no `cwd` field) | the nine above plus `rea`; `xquik` as `serverUrl`; Ghidra-mcp, r2mcp and x64dbg-mcp use the lazy stdio gateway described below |
 | dsh web | `.dsh/agent-presets/reverse-skill/agent.cordis.yml` | ida-pro, ghidra, x64dbg, math, r2, jshook, anything-analyzer, pentestswarm, rea (xquik not added: http transport unverified) |
@@ -777,12 +777,14 @@ portable `npx` vector and bootstrap would render `cmd /c npx` (not used here):
 ```
 
 ```toml
-# .codex/config.toml — NOT added. If wanted later, this is the shape; expect the 138-tool
-# catalog in every Codex turn and set the startup timeout (rea setup uses 30 s).
-[mcp_servers.rea]
-command = "C:\\Program Files\\nodejs\\node.exe"
-args = ["C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npx-cli.js", "-y", "rea-agents@6.1.0", "mcp"]
-startup_timeout_sec = 30
+# .codex/config.toml (Codex) — added 2026-10-10; verified with `codex mcp get rea` and a headless
+# `codex exec` run that called analyze_javascript_application + trace_application_feature.
+[mcp_servers."rea"]
+command = 'C:\Program Files\nodejs\node.exe'
+args = ['C:\Program Files\nodejs\node_modules\npm\bin\npx-cli.js', '-y', 'rea-agents@6.1.0', 'mcp']
+startup_timeout_sec = 90
+tool_timeout_sec = 300
+enabled = true
 ```
 
 Operational notes: the first spawn after an npx-cache purge downloads the package inside the
