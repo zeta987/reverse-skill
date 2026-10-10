@@ -13,7 +13,7 @@ description: 在使用 js-reverse-mcp 做前端 JavaScript 逆向时使用，适
 4. `NEXT`: 缺工具时调用 bootstrap，不要猜路径
 5. `ACT`: 进入"工作流"第一步并执行，不要停在确认状态
 
-> **rea 可用**（MCP 后端 `rea` = reverse-engineer-anything 6.1.0，项目级 stdio 注册，见 `docs/mcp/host-deviations.md`）：Electron/ASAR 或解包后的 JS 目录先 `analyze_javascript_application`（`input_path` 绝对路径）拿应用图与 Evidence，再用 `trace_application_feature`（`application: {kind: "retained-evidence", evidence_id}` + `seed`）追一条功能链；线上页面 `list_browser_targets` → `inspect_web_page` / `analyze_web_bundle`（被动 CDP，不执行 JS），需要交互时 `capture_browser_scenario`，HAR / mitmproxy 存档用 `inspect_web_network_capture`。结论按 observed / inferred / unknown 分开读；`close_binary` 会清空会话账本，先 `export_evidence_bundle` 再按 `../ops/evidence-finding-path.md` §5.2 回灌 `work/<case>/`。rea 没有 scope 门，授权仍以本包 `scope.md` 为准。
+> **rea 可用**（MCP 后端 `rea` = reverse-engineer-anything 6.3.0，项目级 stdio 注册，见 `docs/mcp/host-deviations.md`）：Electron/ASAR 或解包后的 JS 目录先 `analyze_javascript_application`（`input_path` 绝对路径）拿应用图与 Evidence，再用 `trace_application_feature`（`application: {kind: "retained-evidence", evidence_id}` + `seed`）追一条功能链；线上页面 `list_browser_targets` → `inspect_web_page` / `analyze_web_bundle`（被动 CDP，不执行 JS），需要交互时 `capture_browser_scenario`，HAR / mitmproxy 存档用 `inspect_web_network_capture`。6.2.0 起工具回传就是 Evidence 记录本身：分析结果读 `normalized_result`（没有 `result` 外层），语意图节点 / 关系经 `evidence.context_id` 对应 `semantic_graph.evidence_contexts[]`，`evidence.location` 给出 source-range。结论按 observed / inferred / unknown 分开读；`close_binary` 会清空会话账本，先 `export_evidence_bundle` 再按 `../ops/evidence-finding-path.md` §5.2 回灌 `work/<case>/`。rea 没有 scope 门，授权仍以本包 `scope.md` 为准。
 
 ## 适用范围
 

@@ -19,10 +19,22 @@ Upstream releases almost daily (6.1.0 on 2026-10-09, 6.2.0 the same day, 6.3.0 o
 
 ## Supported version
 
-Current pin: **rea-agents@6.1.0** (Node engines `^22.19.0 || ^24.11.0 || >=26.0.0`; host runs
+Current pin: **rea-agents@6.3.0** (Node engines `^22.19.0 || ^24.11.0 || >=26.0.0`; host runs
 Node 24.20.0 / npm 12.2.0). The pin is consumed as the npm package through the npx package
 runner, not as source; the sibling source clone `D:\Data\Coding_Github\Reverse\rea` is for
 reading only and is never built or linked.
+
+Result shape since 6.2.0 (verified on 6.3.0 against the fixture and the advertised
+`outputSchema`): analysis tools return the canonical Evidence record itself as
+`structuredContent` (`evidence_id`, `subject`, `provider`, `analysis_profile`,
+`predicate_type`, `operation`, `parameters`, `raw_result`, `normalized_result`,
+`confidence`, `authority`, `environment`, `limitations`, `locations`, `evidence_links`);
+the 6.1.0 `result` wrapper is gone, so read `normalized_result.*`. Session tools such as
+`export_evidence_bundle` keep `result: {...}`. JavaScript semantic graphs carry
+`evidence_contexts[]` and reference them from nodes/relations through
+`evidence.context_id` + `evidence.location` (source-range); `statistics.truncated_scopes`
+was removed. 6.3.0 adds `inspect_analysis_view` (139 tools); the ~138 schema changes in the
+6.1.0 → 6.3.0 diff are mostly the portable NUL escape in path patterns.
 
 The single version authority is `pinnedVersion` of the `rea` capability in
 `skills/scripts/bootstrap-manifest.json`. Every other occurrence is derived from it and is
@@ -99,7 +111,7 @@ bootstrap would render `cmd /c npx` (not used here). All four files are gitignor
 "rea": {
   "type": "stdio",
   "command": "C:\\Program Files\\nodejs\\node.exe",
-  "args": ["C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npx-cli.js", "-y", "rea-agents@6.1.0", "mcp"]
+  "args": ["C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npx-cli.js", "-y", "rea-agents@6.3.0", "mcp"]
 }
 ```
 
@@ -107,7 +119,7 @@ bootstrap would render `cmd /c npx` (not used here). All four files are gitignor
 // .agents/mcp_config.json (Antigravity) — no type, no cwd
 "rea": {
   "command": "C:\\Program Files\\nodejs\\node.exe",
-  "args": ["C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npx-cli.js", "-y", "rea-agents@6.1.0", "mcp"]
+  "args": ["C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npx-cli.js", "-y", "rea-agents@6.3.0", "mcp"]
 }
 ```
 
@@ -122,7 +134,7 @@ bootstrap would render `cmd /c npx` (not used here). All four files are gitignor
     args:
       - C:\Program Files\nodejs\node_modules\npm\bin\npx-cli.js
       - -y
-      - rea-agents@6.1.0
+      - rea-agents@6.3.0
       - mcp
     cwd: D:\Data\Coding_Github\Reverse\reverse-skill
 ```
@@ -133,7 +145,7 @@ bootstrap would render `cmd /c npx` (not used here). All four files are gitignor
 # The 138-tool catalog loads into every Codex turn (measured: ~787k input tokens, 679k cached).
 [mcp_servers."rea"]
 command = 'C:\Program Files\nodejs\node.exe'
-args = ['C:\Program Files\nodejs\node_modules\npm\bin\npx-cli.js', '-y', 'rea-agents@6.1.0', 'mcp']
+args = ['C:\Program Files\nodejs\node_modules\npm\bin\npx-cli.js', '-y', 'rea-agents@6.3.0', 'mcp']
 startup_timeout_sec = 90
 tool_timeout_sec = 300
 enabled = true
@@ -226,3 +238,4 @@ gitignored. Use a short-lived branch (`dev/rea-<new-version>`), never commit fro
 | Date | From → To | Tool count | tools_list_sha256 | Note |
 |---|---|---|---|---|
 | 2026-10-09 | — → 6.1.0 | 138 | `6994ff1aa24272a5a09913f087907a25f279fd477108391db7ba3e0b35dafb9e` | initial adoption (hand-registered, project scope); rea `tools_sha256` `35487b43394b2482fb84d37ab7fb20c0315671f40a49c4c39b8d048a2c3db5a6`; hash measured 2026-10-10 by test-rea-contract.ps1 |
+| 2026-10-10 | 6.1.0 → 6.3.0 | 139 | `3cb70bd86fa468fa2c502fddd68b7b9bb4c6cd817df25290fdfe70f0281d2d94` | 6.2.0/6.3.0 breaking: results are canonical Evidence records (read normalized_result); semantic graphs carry evidence_contexts; truncated_scopes removed; contract test PASS, 23 referenced tools present, +inspect_analysis_view |

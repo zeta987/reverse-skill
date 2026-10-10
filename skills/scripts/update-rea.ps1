@@ -136,7 +136,8 @@ if ($Mode -eq 'Tracked' -or $Mode -eq 'Both') {
         if ($isGit) {
             $o = [regex]::Escape($old)
             $pattern = ('rea-agents@{0}|rea-agents {0}|reverse-engineer-anything {0}' -f $o)
-            $left = @(& git -C $RepoRoot grep -n -I -E $pattern -- . ':!docs/mcp/host-deviations.md' ':!docs/mcp/rea.md' ':!CHANGELOG.md' 2>$null)
+            # test-rea-tooling.ps1 carries old version strings on purpose (fixture data for the edit logic).
+            $left = @(& git -C $RepoRoot grep -n -I -E $pattern -- . ':!docs/mcp/host-deviations.md' ':!docs/mcp/rea.md' ':!CHANGELOG.md' ':!skills/scripts/test-rea-tooling.ps1' 2>$null)
             if ($LASTEXITCODE -eq 0 -and $left.Count -gt 0) {
                 foreach ($l in $left) { Warn ("stale reference: {0}" -f $l) }
                 $exitCode = 4

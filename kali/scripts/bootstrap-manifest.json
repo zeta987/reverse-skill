@@ -158,22 +158,22 @@
     {
       "name": "rea",
       "bootstrapKind": "npm-mcp",
-      "npmPackage": "rea-agents@6.1.0",
+      "npmPackage": "rea-agents@6.3.0",
       "mcpNames": [
         "rea"
       ],
       "mcpCommand": "npx",
       "mcpArgs": [
         "-y",
-        "rea-agents@6.1.0",
+        "rea-agents@6.3.0",
         "mcp"
       ],
       "mcpEnv": {},
       "docsUrl": "https://github.com/morluto/rea",
       "canAutoInstall": true,
       "verifyCommand": "npx",
-      "pinnedVersion": "6.1.0",
-      "note": "reverse-engineer-anything (REA) 单一 MCP server + CLI（6.1.0：138 个 MCP 工具，tools/list 约 2.4 MB）：JS/Electron 应用图、托管 PE/CLI、ZIP/APK/IPA/MSIX/DMG 清单、被动 CDP 网页检查、HAR/mitmproxy 存档、Evidence bundle 导入导出。stdio 入口 `npx -y rea-agents@6.1.0 mcp`，无需 token。本仓库只做项目级手写注册（.mcp.json / .codex/config.toml / .agents/mcp_config.json / dsh preset；Codex 每轮会载入完整工具目录，实测一次 headless 运行约 78.7 万输入 token、其中 67.9 万命中缓存），不运行 `rea setup`（它写用户级客户端配置）。原生 provider 均未配置：Hopper 不支持 Windows；Ghidra provider 要求 12.1.x（本机 12.0.2 + 环回补丁的 GhydraMCP 不替换）；IDA provider 会与现有 ida-pro-mcp 重复登记同一 13337 后端且需要 ida-pro-mcp 2.0.0 没有的 supervisor API。Android inspect_* / macOS 原生工具 / 固件 / 进程捕获在 Windows 上报 unsupported_host 或 provider_missing，见 docs/mcp/host-deviations.md。rea 没有 scope/permission 门，授权仍以本包 scope.md 为准。",
+      "pinnedVersion": "6.3.0",
+      "note": "reverse-engineer-anything (REA) 单一 MCP server + CLI（6.3.0：139 个 MCP 工具，tools/list 约 1.8 MB）：JS/Electron 应用图、托管 PE/CLI、ZIP/APK/IPA/MSIX/DMG 清单、被动 CDP 网页检查、HAR/mitmproxy 存档、Evidence bundle 导入导出。stdio 入口 `npx -y rea-agents@6.3.0 mcp`，无需 token。本仓库只做项目级手写注册（.mcp.json / .codex/config.toml / .agents/mcp_config.json / dsh preset；Codex 每轮会载入完整工具目录，实测一次 headless 运行约 78.7 万输入 token、其中 67.9 万命中缓存），不运行 `rea setup`（它写用户级客户端配置）。原生 provider 均未配置：Hopper 不支持 Windows；Ghidra provider 要求 12.1.x（本机 12.0.2 + 环回补丁的 GhydraMCP 不替换）；IDA provider 会与现有 ida-pro-mcp 重复登记同一 13337 后端且需要 ida-pro-mcp 2.0.0 没有的 supervisor API。Android inspect_* / macOS 原生工具 / 固件 / 进程捕获在 Windows 上报 unsupported_host 或 provider_missing，见 docs/mcp/host-deviations.md。rea 没有 scope/permission 门，授权仍以本包 scope.md 为准。",
       "kaliNote": "Same npm-mcp shape as jshookmcp; the Kali/POSIX bootstrap scripts have no rea handler yet (not verified on Kali). Linux hosts additionally unlock the Android JADX inspect tools, process capture and Binwalk/Unblob firmware extraction when those prerequisites are supplied."
     },
     {
